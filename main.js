@@ -3,21 +3,21 @@ const path = require('path');
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1000,
-    height: 800,
-    title: "Fire Radio Desktop",
+    width: 1100,
+    height: 850,
+    title: "Fire Radio Dispatch Console",
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     }
   });
 
-  // Fixed the variable name to __dirname
   win.loadFile(path.join(__dirname, 'public/index.html'));
-
-  // Professional look: hide the default top menu
   win.setMenuBarVisibility(false);
 }
+
+// Set permissions for media devices in Electron
+app.commandLine.appendSwitch('enable-features', 'AudioServiceSandbox');
 
 app.whenReady().then(createWindow);
 

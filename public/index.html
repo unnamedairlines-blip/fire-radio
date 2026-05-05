@@ -1,90 +1,543 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio Console</title>
+    <title>Fire Radio Dispatch Console</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #121212; color: #e0e0e0; padding: 40px; }
-        .container { border: 2px solid #333; border-radius: 15px; padding: 30px; background: #1e1e1e; max-width: 600px; margin: auto; }
-        #status-light { width: 15px; height: 15px; border-radius: 50%; background: gray; display: inline-block; margin-right: 10px; }
-        .connected { background: #00ff00 !important; }
-        .live { background: #ff0000 !important; box-shadow: 0 0 10px #ff0000; }
-        
-        .controls { display: flex; gap: 20px; justify-content: center; margin-top: 30px; }
-        button { 
-            background: #333; color: white; border: none; padding: 15px 30px; 
-            font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.3s;
+        :root {
+            --bg-dark: #0f111a;
+            --panel-bg: #1e2230;
+            --border-color: #2e3440;
+            --accent-red: #ff3e3e;
+            --accent-green: #00e676;
+            --accent-blue: #00b0ff;
+            --text-main: #f5f6f9;
+            --text-muted: #8892b0;
         }
-        button:hover { background: #444; }
-        .btn-broadcast.active { background: #990000; }
-        .btn-listen.active { background: #005599; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            user-select: none;
+        }
+
+        h1, h2, h3 { margin: 0 0 10px 0; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Left Side: Settings Panel */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input[type="text"], select {
+            width: 100%;
+            padding: 10px;
+            background: #121620;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+
+        input[type="text"]:focus, select:focus {
+            border-color: var(--accent-blue);
+            outline: none;
+        }
+
+        /* Keybind Capturer Button */
+        .keybind-btn {
+            width: 100%;
+            padding: 10px;
+            background: #252b3d;
+            border: 1px dashed var(--accent-blue);
+            color: var(--accent-blue);
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .keybind-btn.recording {
+            background: var(--accent-red);
+            color: white;
+            border-style: solid;
+            animation: pulse 1s infinite alternate;
+        }
+
+        /* Right Side: Channels Grid */
+        .main-content {
+            display: grid;
+            grid-template-rows: auto 1fr;
+            gap: 20px;
+        }
+
+        .console-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .channel-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .channel-card {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 400px;
+            transition: all 0.2s ease;
+        }
+
+        .channel-card.active-monitor {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 15px rgba(0, 176, 255, 0.2);
+        }
+
+        .channel-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: bold;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #555;
+        }
+
+        .active-monitor .status-dot {
+            background: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
+        }
+
+        /* PTT Button & Interface */
+        .ptt-container {
+            text-align: center;
+            margin-top: auto;
+        }
+
+        .ptt-btn {
+            width: 100%;
+            padding: 25px;
+            font-size: 18px;
+            font-weight: bold;
+            text-transform: uppercase;
+            border-radius: 8px;
+            border: none;
+            color: white;
+            background: #2d3245;
+            cursor: not-allowed;
+            transition: 0.2s;
+        }
+
+        /* Enabled channel button styling */
+        .active-monitor .ptt-btn {
+            background: #256a42;
+            cursor: pointer;
+        }
+
+        .active-monitor .ptt-btn:active, .active-monitor .ptt-btn.transmitting {
+            background: var(--accent-red) !important;
+            box-shadow: 0 0 15px var(--accent-red);
+            transform: scale(0.98);
+        }
+
+        /* Checkbox Switch for Monitoring */
+        .switch-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #252b3d;
+            margin-bottom: 15px;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 26px;
+        }
+
+        .switch input { opacity: 0; width: 0; height: 0; }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #3b4252;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px; width: 18px;
+            left: 4px; bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider { background-color: var(--accent-blue); }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        @keyframes pulse {
+            from { opacity: 1; }
+            to { opacity: 0.6; }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>FIRE RADIO</h1>
-        <div>
-            <span id="status-light"></span>
-            <span id="status-text">CONNECTING...</span>
+
+    <div class="dashboard">
+        <div class="sidebar">
+            <div class="panel">
+                <h2>CONSOLE SETUP</h2>
+                <hr style="border: 0; border-top: 1px solid var(--border-color); margin-bottom: 20px;">
+                
+                <div class="form-group">
+                    <label for="callsign">Unit Callsign</label>
+                    <input type="text" id="callsign" value="DISPATCH-1" placeholder="Enter Callsign...">
+                </div>
+
+                <div class="form-group">
+                    <label for="micInput">Microphone Input</label>
+                    <select id="micInput">
+                        <option value="default">Default System Mic</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="audioOutput">Audio Output Device</label>
+                    <select id="audioOutput">
+                        <option value="default">Default Speakers</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Push-To-Talk Keybind</label>
+                    <button id="keybindBtn" class="keybind-btn">SPACEBAR</button>
+                    <span style="font-size: 10px; color: var(--text-muted); display: block; margin-top: 5px;">Click to change, press any key.</span>
+                </div>
+            </div>
+
+            <div class="panel" style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 12px; font-weight: bold; color: var(--text-muted);">RELAY NETWORK:</span>
+                <span id="network-status" style="color: var(--accent-red); font-weight: bold; font-size: 12px;">OFFLINE</span>
+            </div>
         </div>
 
-        <div class="controls">
-            <button id="broadcastBtn" class="btn-broadcast">GO LIVE</button>
-            <button id="listenBtn" class="btn-listen">START LISTENING</button>
+        <div class="main-content">
+            <div class="console-header">
+                <h2>RTO RADIO SUITE</h2>
+                <div id="active-callsign-display" style="font-weight: bold; color: var(--accent-blue);">CALLSIGN: DISPATCH-1</div>
+            </div>
+
+            <div class="channel-grid">
+                <div class="channel-card" id="card-fire-rto">
+                    <div>
+                        <h3>Fire RTO</h3>
+                        <div class="channel-status">
+                            <span class="status-dot"></span>
+                            <span class="status-text">DISCONNECTED</span>
+                        </div>
+                        <div class="switch-container">
+                            <span>Monitor Channel</span>
+                            <label class="switch">
+                                <input type="checkbox" class="monitor-toggle" data-channel="fire-rto">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="ptt-container">
+                        <button class="ptt-btn" disabled>HOLD TO TALK</button>
+                    </div>
+                </div>
+
+                <div class="channel-card" id="card-ops-1">
+                    <div>
+                        <h3>Operations 1</h3>
+                        <div class="channel-status">
+                            <span class="status-dot"></span>
+                            <span class="status-text">DISCONNECTED</span>
+                        </div>
+                        <div class="switch-container">
+                            <span>Monitor Channel</span>
+                            <label class="switch">
+                                <input type="checkbox" class="monitor-toggle" data-channel="ops-1">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="ptt-container">
+                        <button class="ptt-btn" disabled>HOLD TO TALK</button>
+                    </div>
+                </div>
+
+                <div class="channel-card" id="card-ops-2">
+                    <div>
+                        <h3>Operations 2</h3>
+                        <div class="channel-status">
+                            <span class="status-dot"></span>
+                            <span class="status-text">DISCONNECTED</span>
+                        </div>
+                        <div class="switch-container">
+                            <span>Monitor Channel</span>
+                            <label class="switch">
+                                <input type="checkbox" class="monitor-toggle" data-channel="ops-2">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="ptt-container">
+                        <button class="ptt-btn" disabled>HOLD TO TALK</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
         const socket = io("https://fire-radio.onrender.com");
-        const statusLight = document.getElementById('status-light');
-        const statusText = document.getElementById('status-text');
         
-        const broadcastBtn = document.getElementById('broadcastBtn');
-        const listenBtn = document.getElementById('listenBtn');
-        
-        let isLive = false;
-        let isListening = false;
-        let recorder;
-        let audioContext;
+        let pttKey = " "; // Default key is Spacebar
+        let isRecordingKey = false;
+        let activeTransmittingChannel = null;
+        let localStream = null;
+        let mediaRecorder = null;
+        let activeOutputDevice = "default";
 
-        socket.on('connect', () => {
-            statusLight.className = 'connected';
-            statusText.innerText = "CONNECTED TO CLOUD";
+        // DOM elements
+        const callsignInput = document.getElementById('callsign');
+        const callsignDisplay = document.getElementById('active-callsign-display');
+        const keybindBtn = document.getElementById('keybindBtn');
+        const networkStatus = document.getElementById('network-status');
+        const micSelect = document.getElementById('micInput');
+        const speakerSelect = document.getElementById('audioOutput');
+
+        // Update callsign instantly on keyup
+        callsignInput.addEventListener('keyup', () => {
+            const callsign = callsignInput.value.toUpperCase() || "UNNAMED";
+            callsignDisplay.innerText = `CALLSIGN: ${callsign}`;
         });
 
-        // --- BROADCASTER LOGIC ---
-        broadcastBtn.onclick = async () => {
-            if (!isLive) {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                recorder = new MediaRecorder(stream);
-                recorder.ondataavailable = (e) => { if (e.data.size > 0) socket.emit('audio-data', e.data); };
-                recorder.start(200);
-                isLive = true;
-                broadcastBtn.innerText = "STOP LIVE";
-                broadcastBtn.classList.add('active');
-                statusLight.className = 'live';
-            } else {
-                recorder.stop();
-                isLive = false;
-                broadcastBtn.innerText = "GO LIVE";
-                broadcastBtn.classList.remove('active');
-                statusLight.className = 'connected';
+        // Capture PTT keybind mapping
+        keybindBtn.addEventListener('click', () => {
+            isRecordingKey = true;
+            keybindBtn.innerText = "PRESS ANY KEY...";
+            keybindBtn.classList.add('recording');
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (isRecordingKey) {
+                e.preventDefault();
+                pttKey = e.key;
+                keybindBtn.innerText = e.key === " " ? "SPACEBAR" : e.key.toUpperCase();
+                keybindBtn.classList.remove('recording');
+                isRecordingKey = false;
+                return;
             }
-        };
 
-        // --- LISTENER LOGIC ---
-        listenBtn.onclick = () => {
-            isListening = !isListening;
-            listenBtn.innerText = isListening ? "STOP LISTENING" : "START LISTENING";
-            listenBtn.classList.toggle('active');
-        };
+            // Trigger PTT on key press down
+            if (e.key === pttKey && !e.repeat) {
+                const checkedToggles = document.querySelectorAll('.monitor-toggle:checked');
+                if (checkedToggles.length > 0) {
+                    // Start transmitting on the first monitored channel found
+                    const channel = checkedToggles[0].dataset.channel;
+                    startTransmission(channel);
+                }
+            }
+        });
 
-        socket.on('audio-stream', (audioData) => {
-            if (isListening) {
-                const blob = new Blob([audioData], { type: 'audio/webm' });
+        window.addEventListener('keyup', (e) => {
+            if (e.key === pttKey && activeTransmittingChannel) {
+                stopTransmission();
+            }
+        });
+
+        // Handle Audio Input/Output Device Enumeration
+        async function getDevices() {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            micSelect.innerHTML = "";
+            speakerSelect.innerHTML = "";
+
+            devices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `${device.kind} (${device.deviceId.slice(0, 5)})`;
+                
+                if (device.kind === 'audioinput') {
+                    micSelect.appendChild(option);
+                } else if (device.kind === 'audiooutput') {
+                    speakerSelect.appendChild(option);
+                }
+            });
+        }
+
+        // Initialize Audio routing
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(() => {
+            getDevices();
+        });
+
+        speakerSelect.addEventListener('change', () => {
+            activeOutputDevice = speakerSelect.value;
+        });
+
+        // Connect/Disconnect states
+        socket.on('connect', () => {
+            networkStatus.innerText = "ONLINE";
+            networkStatus.style.color = "var(--accent-green)";
+        });
+
+        socket.on('disconnect', () => {
+            networkStatus.innerText = "OFFLINE";
+            networkStatus.style.color = "var(--accent-red)";
+        });
+
+        // Set up Monitor states and styles dynamically
+        document.querySelectorAll('.monitor-toggle').forEach(toggle => {
+            toggle.addEventListener('change', (e) => {
+                const channel = e.target.dataset.channel;
+                const card = document.getElementById(`card-${channel}`);
+                const statusDot = card.querySelector('.status-dot');
+                const statusText = card.querySelector('.status-text');
+                const pttBtn = card.querySelector('.ptt-btn');
+
+                if (e.target.checked) {
+                    card.classList.add('active-monitor');
+                    statusText.innerText = "MONITORING";
+                    pttBtn.disabled = false;
+                    
+                    // Attach interactive clicking PTT behaviors
+                    pttBtn.onmousedown = () => startTransmission(channel);
+                    pttBtn.onmouseup = () => stopTransmission();
+                } else {
+                    card.classList.remove('active-monitor');
+                    statusText.innerText = "DISCONNECTED";
+                    pttBtn.disabled = true;
+                    pttBtn.onmousedown = null;
+                    pttBtn.onmouseup = null;
+                }
+            });
+        });
+
+        // Broadcast Audio out to Server
+        async function startTransmission(channel) {
+            if (activeTransmittingChannel) return;
+
+            activeTransmittingChannel = channel;
+            const card = document.getElementById(`card-${channel}`);
+            const pttBtn = card.querySelector('.ptt-btn');
+            pttBtn.classList.add('transmitting');
+            pttBtn.innerText = "TRANSMITTING";
+
+            try {
+                // Fetch the selected microphone explicitly
+                const constraints = {
+                    audio: { deviceId: micSelect.value ? { exact: micSelect.value } : undefined }
+                };
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                mediaRecorder = new MediaRecorder(localStream);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        socket.emit('audio-data', {
+                            channel: channel,
+                            callsign: callsignInput.value.toUpperCase() || "DISPATCH-1",
+                            data: event.data
+                        });
+                    }
+                };
+                mediaRecorder.start(100); // 100ms chunks for hyper-low latency
+            } catch (err) {
+                console.error("Mic Access failed", err);
+                stopTransmission();
+            }
+        }
+
+        function stopTransmission() {
+            if (!activeTransmittingChannel) return;
+
+            const card = document.getElementById(`card-${activeTransmittingChannel}`);
+            const pttBtn = card.querySelector('.ptt-btn');
+            pttBtn.classList.remove('transmitting');
+            pttBtn.innerText = "HOLD TO TALK";
+
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+
+            activeTransmittingChannel = null;
+        }
+
+        // Receive incoming Audio streams from server and route to the correct output device
+        socket.on('audio-stream', async (packet) => {
+            // Verify if we are actively monitoring the channel that this packet belongs to
+            const toggle = document.querySelector(`.monitor-toggle[data-channel="${packet.channel}"]`);
+            if (toggle && toggle.checked && packet.callsign !== callsignInput.value.toUpperCase()) {
+                const blob = new Blob([packet.data], { type: 'audio/webm' });
                 const url = URL.createObjectURL(blob);
                 const audio = new Audio(url);
+
+                // Set speaker device output routing
+                if (typeof audio.setSinkId === 'function' && activeOutputDevice !== 'default') {
+                    await audio.setSinkId(activeOutputDevice);
+                }
+
                 audio.play();
             }
         });
