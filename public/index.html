@@ -17,11 +17,11 @@
         input, select { width: 100%; padding: 10px; background: #121620; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; }
         .channel-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
         .channel-card { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; min-height: 500px; display: flex; flex-direction: column; }
-        .connect-btn { width: 100%; padding: 12px; margin-bottom: 10px; cursor: pointer; border-radius: 5px; border: none; font-weight: bold; background: #3b4252; color: white; transition: 0.2s; }
+        .connect-btn { width: 100%; padding: 12px; margin-bottom: 10px; cursor: pointer; border: none; font-weight: bold; background: #3b4252; color: white; border-radius: 5px; }
         .connected-active { background: var(--accent-blue) !important; }
-        .unit-list-container { flex-grow: 1; background: #121620; border-radius: 4px; margin: 10px 0; padding: 10px; font-size: 12px; border: 1px solid #252b3d; overflow-y: auto; }
+        .unit-list-container { flex-grow: 1; background: #121620; border-radius: 4px; margin: 10px 0; padding: 10px; font-size: 12px; border: 1px solid #252b3d; }
         .unit-entry { padding: 6px 10px; margin-bottom: 4px; background: #1e2230; border-left: 3px solid var(--accent-green); }
-        .ptt-btn { width: 100%; padding: 25px; font-weight: bold; border-radius: 8px; border: none; cursor: not-allowed; background: #2a2f3a; color: #555; text-transform: uppercase; }
+        .ptt-btn { width: 100%; padding: 25px; font-weight: bold; border-radius: 8px; border: none; background: #2a2f3a; color: #555; text-transform: uppercase; }
         .can-talk { background: #256a42 !important; color: white !important; cursor: pointer !important; }
         .transmitting { background: var(--accent-red) !important; box-shadow: 0 0 15px var(--accent-red); animation: pulse 0.8s infinite; }
         @keyframes pulse { from { opacity: 1; } to { opacity: 0.7; } }
@@ -33,22 +33,10 @@
         <div class="sidebar">
             <div class="panel">
                 <h2>CONSOLE SETUP</h2>
-                <div class="form-group">
-                    <label>Callsign</label>
-                    <input type="text" id="callsign" value="UNIT-1">
-                </div>
-                <div class="form-group">
-                    <label>PTT Keybind</label>
-                    <button id="keybindBtn" style="width:100%; padding:10px; background:#252b3d; color:var(--accent-blue); border:none; cursor:pointer;">SPACEBAR</button>
-                </div>
-                <div class="form-group">
-                    <label>Mic Input</label>
-                    <select id="micInput"></select>
-                </div>
-                <div class="form-group">
-                    <label>Speaker Output</label>
-                    <select id="audioOutput"></select>
-                </div>
+                <div class="form-group"><label>Callsign</label><input type="text" id="callsign" value="UNIT-1"></div>
+                <div class="form-group"><label>PTT Key</label><button id="keybindBtn" style="width:100%; padding:10px; background:#252b3d; color:var(--accent-blue); border:none;">SPACEBAR</button></div>
+                <div class="form-group"><label>Mic</label><select id="micInput"></select></div>
+                <div class="form-group"><label>Speaker</label><select id="audioOutput"></select></div>
             </div>
         </div>
 
@@ -57,23 +45,22 @@
                 <div class="channel-card" id="card-fire-rto">
                     <h3>Fire RTO</h3>
                     <button class="connect-btn" data-channel="fire-rto">CONNECT</button>
-                    <label style="font-size: 12px;"><input type="checkbox" class="monitor-toggle" data-channel="fire-rto"> MONITOR ONLY</label>
+                    <label style="font-size:11px"><input type="checkbox" class="monitor-toggle" data-channel="fire-rto"> MONITOR</label>
                     <div class="unit-list-container" id="units-fire-rto"></div>
                     <button class="ptt-btn" id="ptt-fire-rto" disabled>PTT IDLE</button>
                 </div>
-
+                <!-- Repeat for Ops 1 and 2 -->
                 <div class="channel-card" id="card-ops-1">
                     <h3>Operations 1</h3>
                     <button class="connect-btn" data-channel="ops-1">CONNECT</button>
-                    <label style="font-size: 12px;"><input type="checkbox" class="monitor-toggle" data-channel="ops-1"> MONITOR ONLY</label>
+                    <label style="font-size:11px"><input type="checkbox" class="monitor-toggle" data-channel="ops-1"> MONITOR</label>
                     <div class="unit-list-container" id="units-ops-1"></div>
                     <button class="ptt-btn" id="ptt-ops-1" disabled>PTT IDLE</button>
                 </div>
-
                 <div class="channel-card" id="card-ops-2">
                     <h3>Operations 2</h3>
                     <button class="connect-btn" data-channel="ops-2">CONNECT</button>
-                    <label style="font-size: 12px;"><input type="checkbox" class="monitor-toggle" data-channel="ops-2"> MONITOR ONLY</label>
+                    <label style="font-size:11px"><input type="checkbox" class="monitor-toggle" data-channel="ops-2"> MONITOR</label>
                     <div class="unit-list-container" id="units-ops-2"></div>
                     <button class="ptt-btn" id="ptt-ops-2" disabled>PTT IDLE</button>
                 </div>
@@ -85,19 +72,17 @@
     <script>
         const socket = io("https://fire-radio.onrender.com");
         let pttKey = " ";
-        let isRecordingKey = false;
         let mediaRecorder;
-        let localStream;
         let activeChannel = null;
         let isTalking = false;
 
-        // --- BUTTON HANDLERS ---
+        // UI & Registry
         document.querySelectorAll('.connect-btn').forEach(btn => {
             btn.onclick = () => {
                 const chan = btn.dataset.channel;
                 activeChannel = (activeChannel === chan) ? null : chan;
                 updateUI();
-                syncStatus();
+                socket.emit('update-status', { callsign: document.getElementById('callsign').value.toUpperCase(), activeChannel });
             };
         });
 
@@ -105,74 +90,48 @@
             document.querySelectorAll('.connect-btn').forEach(btn => {
                 const chan = btn.dataset.channel;
                 const ptt = document.getElementById(`ptt-${chan}`);
-                if (activeChannel === chan) {
-                    btn.innerText = "ACTIVE";
-                    btn.classList.add('connected-active');
-                    ptt.disabled = false;
-                    ptt.classList.add('can-talk');
-                    ptt.innerText = "HOLD TO TALK";
-                } else {
-                    btn.innerText = "CONNECT";
-                    btn.classList.remove('connected-active');
-                    ptt.disabled = true;
-                    ptt.classList.remove('can-talk');
-                    ptt.innerText = "PTT IDLE";
-                }
+                const isActive = activeChannel === chan;
+                btn.innerText = isActive ? "ACTIVE" : "CONNECT";
+                btn.classList.toggle('connected-active', isActive);
+                ptt.disabled = !isActive;
+                ptt.classList.toggle('can-talk', isActive);
             });
         }
 
-        function syncStatus() {
-            socket.emit('update-status', {
-                callsign: document.getElementById('callsign').value.toUpperCase(),
-                activeChannel: activeChannel
-            });
-        }
-
-        socket.on('unit-list-update', (registry) => {
+        socket.on('unit-list-update', (reg) => {
             ['fire-rto', 'ops-1', 'ops-2'].forEach(chan => {
                 const list = document.getElementById(`units-${chan}`);
-                list.innerHTML = "";
-                Object.values(registry).forEach(unit => {
-                    if (unit.activeChannel === chan) {
-                        const div = document.createElement('div');
-                        div.className = 'unit-entry';
-                        div.innerText = unit.callsign;
-                        list.appendChild(div);
-                    }
-                });
+                list.innerHTML = Object.values(reg).filter(u => u.activeChannel === chan)
+                    .map(u => `<div class="unit-entry">${u.callsign}</div>`).join('');
             });
         });
 
-        // --- AUDIO TRANSMISSION ---
+        // TRANSMIT
         async function startTx() {
             if (!activeChannel || isTalking) return;
             isTalking = true;
             document.getElementById(`ptt-${activeChannel}`).classList.add('transmitting');
-
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { deviceId: document.getElementById('micInput').value } 
-                });
-                
-                mediaRecorder = new MediaRecorder(localStream);
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        const reader = new FileReader();
-                        reader.readAsDataURL(event.data); // Convert to Base64
-                        reader.onloadend = () => {
-                            socket.emit('audio-data', {
-                                channel: activeChannel,
-                                callsign: document.getElementById('callsign').value.toUpperCase(),
-                                audio: reader.result
-                            });
-                        };
-                    }
-                };
-                mediaRecorder.start(250); // Send every quarter second
-            } catch (err) {
-                console.error(err);
-                stopTx();
-            }
+            
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true, noiseSuppression: true } 
+            });
+            
+            // WEBM format is crucial for headers
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+            mediaRecorder.ondataavailable = async (e) => {
+                if (e.data.size > 0) {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(e.data);
+                    reader.onloadend = () => {
+                        socket.emit('audio-data', {
+                            channel: activeChannel,
+                            callsign: document.getElementById('callsign').value.toUpperCase(),
+                            audio: reader.result
+                        });
+                    };
+                }
+            };
+            mediaRecorder.start(250);
         }
 
         function stopTx() {
@@ -180,42 +139,44 @@
             isTalking = false;
             if (activeChannel) document.getElementById(`ptt-${activeChannel}`).classList.remove('transmitting');
             if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
-            if (localStream) localStream.getTracks().forEach(t => t.stop());
         }
 
-        // --- KEYBIND LISTENER ---
-        window.addEventListener('keydown', (e) => {
-            if (e.key === pttKey && !e.repeat) startTx();
-        });
-        window.addEventListener('keyup', (e) => {
-            if (e.key === pttKey) stopTx();
-        });
+        window.addEventListener('keydown', (e) => { if (e.key === pttKey && !e.repeat) startTx(); });
+        window.addEventListener('keyup', (e) => { if (e.key === pttKey) stopTx(); });
 
-        // --- AUDIO RECEPTION ---
-        socket.on('audio-stream', async (packet) => {
+        // RECEIVE (Queue Management)
+        let audioQueue = [];
+        let isPlaying = false;
+
+        socket.on('audio-stream', (packet) => {
             const monitor = document.querySelector(`.monitor-toggle[data-channel="${packet.channel}"]`);
             const isSelf = packet.callsign === document.getElementById('callsign').value.toUpperCase();
             
             if (!isSelf && (activeChannel === packet.channel || (monitor && monitor.checked))) {
-                const audio = new Audio(packet.audio);
-                if (document.getElementById('audioOutput').value !== 'default') {
-                    await audio.setSinkId(document.getElementById('audioOutput').value);
-                }
-                audio.play().catch(e => console.log("Audio playback failed", e));
+                audioQueue.push(packet.audio);
+                if (!isPlaying) playNext();
             }
         });
+
+        function playNext() {
+            if (audioQueue.length === 0) { isPlaying = false; return; }
+            isPlaying = true;
+            let audio = new Audio(audioQueue.shift());
+            if (document.getElementById('audioOutput').value !== 'default') {
+                audio.setSinkId(document.getElementById('audioOutput').value);
+            }
+            audio.onended = playNext;
+            audio.play().catch(() => playNext());
+        }
 
         async function initDevices() {
             const devs = await navigator.mediaDevices.enumerateDevices();
             const micSel = document.getElementById('micInput');
             const spkSel = document.getElementById('audioOutput');
-            micSel.innerHTML = ""; spkSel.innerHTML = "";
             devs.forEach(d => {
-                const opt = document.createElement('option');
-                opt.value = d.deviceId;
-                opt.text = d.label || d.kind;
-                if (d.kind === 'audioinput') micSel.appendChild(opt);
-                if (d.kind === 'audiooutput') spkSel.appendChild(opt);
+                const opt = `<option value="${d.deviceId}">${d.label || d.kind}</option>`;
+                if (d.kind === 'audioinput') micSel.innerHTML += opt;
+                if (d.kind === 'audiooutput') spkSel.innerHTML += opt;
             });
         }
         initDevices();

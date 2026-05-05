@@ -11,20 +11,13 @@ const unitRegistry = {};
 
 io.on('connection', (socket) => {
     unitRegistry[socket.id] = { callsign: 'Unknown', activeChannel: null };
-
     socket.on('update-status', (status) => {
-        unitRegistry[socket.id] = {
-            callsign: status.callsign,
-            activeChannel: status.activeChannel
-        };
+        unitRegistry[socket.id] = { callsign: status.callsign, activeChannel: status.activeChannel };
         io.emit('unit-list-update', unitRegistry);
     });
-
     socket.on('audio-data', (packet) => {
-        // Relay the audio packet to all other connected units
         socket.broadcast.emit('audio-stream', packet);
     });
-
     socket.on('disconnect', () => {
         delete unitRegistry[socket.id];
         io.emit('unit-list-update', unitRegistry);
