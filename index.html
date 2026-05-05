@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fire Radio Desktop</title>
+    <style>
+        body { font-family: sans-serif; background: #222; color: white; text-align: center; }
+        #btn { width: 150px; height: 150px; border-radius: 50%; background: red; border: none; cursor: pointer; }
+        #btn:active { background: darkred; }
+    </style>
+</head>
+<body>
+    <h1>FIRE RADIO</h1>
+    <button id="btn">PTT</button>
+    <p id="status">Connected to: fire-radio.onrender.com</p>
+
+    <!-- Connect to your live server -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io("https://fire-radio.onrender.com");
+        const btn = document.getElementById('btn');
+        let mediaRecorder;
+
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = (e) => socket.emit('audio-stream', e.data);
+
+            btn.onmousedown = () => mediaRecorder.start(100);
+            btn.onmouseup = () => mediaRecorder.stop();
+        });
+
+        socket.on('audio-broadcast', async (data) => {
+            const blob = new Blob([data], { type: 'audio/webm' });
+            const audio = new Audio(URL.createObjectURL(blob));
+            audio.play();
+        });
+    </script>
+</body>
+</html>
