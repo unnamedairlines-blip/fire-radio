@@ -2,17 +2,22 @@ const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http, {
-    cors: { origin: "*" }
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
 });
 
+// Serve the web listener page
 app.use(express.static('public'));
 
 io.on('connection', (socket) => {
-    console.log('User connected to Fire-Radio');
+    console.log('User connected:', socket.id);
 
-    // Receive audio chunk from one user and broadcast to everyone else
-    socket.on('audio-stream', (data) => {
-        socket.broadcast.emit('audio-broadcast', data);
+    // Receive audio from Electron Broadcaster
+    socket.on('audio-data', (data) => {
+        // Send to all listeners (Browsers/Phones)
+        socket.broadcast.emit('audio-stream', data);
     });
 
     socket.on('disconnect', () => {
@@ -20,8 +25,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// Port handling for Render
-const PORT = process.env.PORT || 3000;
-http.listen(PORT, '0.0.0.0', () => {
-    console.log(`Radio server active on port ${PORT}`);
+const PORT = process.env.PORT || 10000;
+http.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
 });

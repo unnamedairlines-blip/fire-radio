@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fire Radio Console</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #1a1a1a; color: white; padding: 50px; }
+        #status { font-weight: bold; font-size: 1.2em; margin-bottom: 20px; color: #ffcc00; }
+        button { 
+            padding: 20px 40px; font-size: 1.5em; cursor: pointer; 
+            border-radius: 10px; border: none; background: #444; color: white;
+            transition: 0.3s;
+        }
+        button:active { transform: scale(0.95); }
+        .live { background: #ff0000 !important; box-shadow: 0 0 20px #ff0000; }
+    </style>
+</head>
+<body>
+    <h1>Fire Radio</h1>
+    <div id="status">Connecting to Cloud...</div>
+    <button id="startBtn">START BROADCAST</button>
+
+    <!-- External Socket.io for Electron compatibility -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        // CHANGE THIS TO YOUR URL:
+        const RENDER_URL = "https://fire-radio.onrender.com";
+        const socket = io(RENDER_URL);
+        
+        const status = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        let isBroadcasting = false;
+        let mediaRecorder;
+
+        socket.on('connect', () => {
+            status.innerText = "CONNECTED TO CLOUD";
+            status.style.color = "#00ff00";
+        });
+
+        socket.on('connect_error', () => {
+            status.innerText = "OFFLINE - Server Sleeping?";
+            status.style.color = "#ff0000";
+        });
+
+        // AUDIO LISTENER (For the Web Browser version)
+        socket.on('audio-stream', (audioData) => {
+            const blob = new Blob([audioData], { type: 'audio/webm' });
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audio.play();
+        });
+
+        // BROADCASTER LOGIC
+        startBtn.onclick = async () => {
+            if (!isBroadcasting) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            socket.emit('audio-data', event.data);
+                        }
+                    };
+
+                    mediaRecorder.start(200); // 200ms chunks
+                    isBroadcasting = true;
+                    startBtn.innerText = "STOP BROADCAST";
+                    startBtn.classList.add('live');
+                    status.innerText = "LIVE ON AIR";
+                } catch (err) {
+                    alert("Microphone access denied or not found.");
+                }
+            } else {
+                mediaRecorder.stop();
+                isBroadcasting = false;
+                startBtn.innerText = "START BROADCAST";
+                startBtn.classList.remove('live');
+                status.innerText = "CONNECTED TO CLOUD";
+            }
+        };
+    </script>
+</body>
+</html>

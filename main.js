@@ -3,23 +3,29 @@ const path = require('path');
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 400,
-    height: 600,
-    title: "Fire Radio",
+    width: 900,
+    height: 700,
+    title: "Fire Radio Desktop",
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     }
   });
 
-  // This loads your local UI
-  win.loadFile('index.html');
-  
-  // Remove the top menu bar for a "radio" feel
-  win.setMenuBarVisibility(false);
+  // Load the local HTML file
+  win.loadFile('public/index.html');
+
+  // Optional: Uncomment the line below to open dev tools automatically for debugging
+  // win.webContents.openDevTools();
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
