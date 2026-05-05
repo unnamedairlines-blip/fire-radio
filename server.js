@@ -7,19 +7,16 @@ const io = require('socket.io')(http, {
 
 app.use(express.static('public'));
 
-// Key: socket.id, Value: { callsign: string, channels: [] }
 const unitRegistry = {};
 
 io.on('connection', (socket) => {
-    unitRegistry[socket.id] = { callsign: 'Unknown', channels: [] };
+    unitRegistry[socket.id] = { callsign: 'Unknown', activeChannel: null };
 
-    // When a user updates their callsign or monitors a channel
     socket.on('update-status', (status) => {
         unitRegistry[socket.id] = {
             callsign: status.callsign,
-            channels: status.channels
+            activeChannel: status.activeChannel // Only one active channel for speaking
         };
-        // Send the updated list to everyone
         io.emit('unit-list-update', unitRegistry);
     });
 
@@ -34,4 +31,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 10000;
-http.listen(PORT, () => console.log(`Registry Server Active on ${PORT}`));
+http.listen(PORT, () => console.log(`Radio Relay Active`));

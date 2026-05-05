@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio Dispatch Console</title>
+    <title>Fire Radio Console</title>
     <style>
         :root {
             --bg-dark: #0f111a; --panel-bg: #1e2230; --border-color: #2e3440;
@@ -17,32 +17,17 @@
         input, select { width: 100%; padding: 10px; background: #121620; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; }
         
         .channel-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-        .channel-card { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; min-height: 500px; display: flex; flex-direction: column; }
-        .active-monitor { border-color: var(--accent-blue); }
+        .channel-card { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; min-height: 550px; display: flex; flex-direction: column; }
         
-        /* New Unit List Styling */
-        .unit-list-container {
-            flex-grow: 1;
-            background: #121620;
-            border-radius: 4px;
-            margin: 10px 0;
-            padding: 10px;
-            font-size: 12px;
-            overflow-y: auto;
-            border: 1px solid #252b3d;
-        }
-        .unit-entry {
-            padding: 4px 8px;
-            margin-bottom: 4px;
-            background: #1e2230;
-            border-left: 3px solid var(--accent-blue);
-            color: var(--text-main);
-        }
+        .connect-btn { width: 100%; padding: 10px; margin-bottom: 10px; cursor: pointer; border-radius: 5px; border: none; font-weight: bold; background: #3b4252; color: white; }
+        .connected-active { background: var(--accent-blue) !important; }
+
+        .unit-list-container { flex-grow: 1; background: #121620; border-radius: 4px; margin: 10px 0; padding: 10px; font-size: 12px; border: 1px solid #252b3d; }
+        .unit-entry { padding: 4px 8px; margin-bottom: 4px; background: #1e2230; border-left: 3px solid var(--accent-green); }
         
-        .ptt-btn { width: 100%; padding: 20px; font-weight: bold; border-radius: 8px; border: none; cursor: pointer; background: #3b4252; color: white; }
-        .active-monitor .ptt-btn { background: #256a42; }
-        .transmitting { background: var(--accent-red) !important; animation: pulse 0.5s infinite alternate; }
-        @keyframes pulse { from { opacity: 1; } to { opacity: 0.7; } }
+        .ptt-btn { width: 100%; padding: 25px; font-weight: bold; border-radius: 8px; border: none; cursor: not-allowed; background: #2a2f3a; color: #555; }
+        .can-talk { background: #256a42 !important; color: white !important; cursor: pointer !important; }
+        .transmitting { background: var(--accent-red) !important; box-shadow: 0 0 15px var(--accent-red); }
     </style>
 </head>
 <body>
@@ -57,14 +42,14 @@
                 </div>
                 <div class="form-group">
                     <label>PTT Keybind</label>
-                    <button id="keybindBtn" style="width:100%; padding:10px; background:#252b3d; color:var(--accent-blue); border:1px dashed var(--accent-blue); cursor:pointer;">SPACEBAR</button>
+                    <button id="keybindBtn" style="width:100%; padding:10px; background:#252b3d; color:var(--accent-blue); border:none; cursor:pointer;">SPACEBAR</button>
                 </div>
                 <div class="form-group">
-                    <label>Input</label>
+                    <label>Mic Input</label>
                     <select id="micInput"></select>
                 </div>
                 <div class="form-group">
-                    <label>Output</label>
+                    <label>Speaker Output</label>
                     <select id="audioOutput"></select>
                 </div>
             </div>
@@ -72,28 +57,29 @@
 
         <div class="main-content">
             <div class="channel-grid">
-                <!-- Template for Channels -->
+                <!-- Channel Template -->
                 <div class="channel-card" id="card-fire-rto">
                     <h3>Fire RTO</h3>
-                    <label><input type="checkbox" class="monitor-toggle" data-channel="fire-rto"> Monitor</label>
-                    <div class="unit-list-container" id="units-fire-rto">
-                        <div style="color:var(--text-muted)">No units connected</div>
-                    </div>
-                    <button class="ptt-btn" id="ptt-fire-rto" disabled>PTT</button>
+                    <button class="connect-btn" data-channel="fire-rto">CONNECT TO CHANNEL</button>
+                    <label style="font-size: 12px;"><input type="checkbox" class="monitor-toggle" data-channel="fire-rto"> Monitor Audio</label>
+                    <div class="unit-list-container" id="units-fire-rto"></div>
+                    <button class="ptt-btn" id="ptt-fire-rto" disabled>HOLD TO TALK</button>
                 </div>
 
                 <div class="channel-card" id="card-ops-1">
                     <h3>Operations 1</h3>
-                    <label><input type="checkbox" class="monitor-toggle" data-channel="ops-1"> Monitor</label>
+                    <button class="connect-btn" data-channel="ops-1">CONNECT TO CHANNEL</button>
+                    <label style="font-size: 12px;"><input type="checkbox" class="monitor-toggle" data-channel="ops-1"> Monitor Audio</label>
                     <div class="unit-list-container" id="units-ops-1"></div>
-                    <button class="ptt-btn" id="ptt-ops-1" disabled>PTT</button>
+                    <button class="ptt-btn" id="ptt-ops-1" disabled>HOLD TO TALK</button>
                 </div>
 
                 <div class="channel-card" id="card-ops-2">
                     <h3>Operations 2</h3>
-                    <label><input type="checkbox" class="monitor-toggle" data-channel="ops-2"> Monitor</label>
+                    <button class="connect-btn" data-channel="ops-2">CONNECT TO CHANNEL</button>
+                    <label style="font-size: 12px;"><input type="checkbox" class="monitor-toggle" data-channel="ops-2"> Monitor Audio</label>
                     <div class="unit-list-container" id="units-ops-2"></div>
-                    <button class="ptt-btn" id="ptt-ops-2" disabled>PTT</button>
+                    <button class="ptt-btn" id="ptt-ops-2" disabled>HOLD TO TALK</button>
                 </div>
             </div>
         </div>
@@ -105,33 +91,54 @@
         let pttKey = " ";
         let isRecordingKey = false;
         let mediaRecorder;
-        let activeChannel = null;
+        let localStream;
+        let activeChannel = null; // The channel we are "Connected" to
 
-        // --- REGISTRY SYNC ---
-        function syncStatus() {
-            const monitored = Array.from(document.querySelectorAll('.monitor-toggle:checked'))
-                                   .map(t => t.dataset.channel);
-            socket.emit('update-status', {
-                callsign: document.getElementById('callsign').value.toUpperCase(),
-                channels: monitored
+        // --- CONNECTION & REGISTRY ---
+        document.querySelectorAll('.connect-btn').forEach(btn => {
+            btn.onclick = () => {
+                const chan = btn.dataset.channel;
+                if (activeChannel === chan) {
+                    activeChannel = null;
+                } else {
+                    activeChannel = chan;
+                }
+                updateUI();
+                syncStatus();
+            };
+        });
+
+        function updateUI() {
+            document.querySelectorAll('.connect-btn').forEach(btn => {
+                const chan = btn.dataset.channel;
+                const ptt = document.getElementById(`ptt-${chan}`);
+                if (activeChannel === chan) {
+                    btn.innerText = "CONNECTED";
+                    btn.classList.add('connected-active');
+                    ptt.disabled = false;
+                    ptt.classList.add('can-talk');
+                } else {
+                    btn.innerText = "CONNECT TO CHANNEL";
+                    btn.classList.remove('connected-active');
+                    ptt.disabled = true;
+                    ptt.classList.remove('can-talk');
+                }
             });
         }
 
-        document.getElementById('callsign').addEventListener('change', syncStatus);
-        document.querySelectorAll('.monitor-toggle').forEach(t => t.addEventListener('change', (e) => {
-            const chan = e.target.dataset.channel;
-            document.getElementById(`card-${chan}`).classList.toggle('active-monitor', e.target.checked);
-            document.getElementById(`ptt-${chan}`).disabled = !e.target.checked;
-            syncStatus();
-        }));
+        function syncStatus() {
+            socket.emit('update-status', {
+                callsign: document.getElementById('callsign').value.toUpperCase(),
+                activeChannel: activeChannel
+            });
+        }
 
         socket.on('unit-list-update', (registry) => {
-            const channels = ['fire-rto', 'ops-1', 'ops-2'];
-            channels.forEach(chan => {
+            ['fire-rto', 'ops-1', 'ops-2'].forEach(chan => {
                 const list = document.getElementById(`units-${chan}`);
                 list.innerHTML = "";
                 Object.values(registry).forEach(unit => {
-                    if (unit.channels.includes(chan)) {
+                    if (unit.activeChannel === chan) {
                         const div = document.createElement('div');
                         div.className = 'unit-entry';
                         div.innerText = unit.callsign;
@@ -141,56 +148,56 @@
             });
         });
 
-        // --- PTT LOGIC ---
-        window.addEventListener('keydown', async (e) => {
-            if (isRecordingKey) { pttKey = e.key; isRecordingKey = false; return; }
-            if (e.key === pttKey && !activeChannel) {
-                const firstActive = document.querySelector('.monitor-toggle:checked');
-                if (firstActive) startTx(firstActive.dataset.channel);
-            }
-        });
-
-        window.addEventListener('keyup', (e) => { if (e.key === pttKey) stopTx(); });
-
-        async function startTx(chan) {
-            activeChannel = chan;
-            const btn = document.getElementById(`ptt-${chan}`);
+        // --- AUDIO ENGINE ---
+        async function startTx() {
+            if (!activeChannel) return;
+            const btn = document.getElementById(`ptt-${activeChannel}`);
             btn.classList.add('transmitting');
-            
-            const stream = await navigator.mediaDevices.getUserMedia({ 
+
+            localStream = await navigator.mediaDevices.getUserMedia({ 
                 audio: { deviceId: document.getElementById('micInput').value } 
             });
-            mediaRecorder = new MediaRecorder(stream);
+            
+            mediaRecorder = new MediaRecorder(localStream, { mimeType: 'audio/webm' });
             mediaRecorder.ondataavailable = (e) => {
-                socket.emit('audio-data', { 
-                    channel: chan, 
-                    callsign: document.getElementById('callsign').value, 
-                    data: e.data 
-                });
+                if (e.data.size > 0) {
+                    socket.emit('audio-data', { 
+                        channel: activeChannel, 
+                        callsign: document.getElementById('callsign').value, 
+                        data: e.data 
+                    });
+                }
             };
             mediaRecorder.start(100);
         }
 
         function stopTx() {
-            if (!activeChannel) return;
-            document.getElementById(`ptt-${activeChannel}`).classList.remove('transmitting');
-            mediaRecorder.stop();
-            activeChannel = null;
+            if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+            if (localStream) localStream.getTracks().forEach(t => t.stop());
+            if (activeChannel) document.getElementById(`ptt-${activeChannel}`).classList.remove('transmitting');
         }
 
-        // --- AUDIO RECEIVE ---
+        window.addEventListener('keydown', (e) => {
+            if (e.key === pttKey && !e.repeat) startTx();
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.key === pttKey) stopTx();
+        });
+
         socket.on('audio-stream', async (packet) => {
             const monitor = document.querySelector(`.monitor-toggle[data-channel="${packet.channel}"]`);
-            if (monitor && monitor.checked && packet.callsign !== document.getElementById('callsign').value) {
-                const audio = new Audio(URL.createObjectURL(new Blob([packet.data])));
-                if (document.getElementById('audioOutput').value !== 'default') {
-                    await audio.setSinkId(document.getElementById('audioOutput').value);
+            // Fixed: Play if monitoring OR if connected to the channel
+            if ((monitor && monitor.checked) || activeChannel === packet.channel) {
+                if (packet.callsign !== document.getElementById('callsign').value) {
+                    const audio = new Audio(URL.createObjectURL(new Blob([packet.data], {type: 'audio/webm'})));
+                    if (document.getElementById('audioOutput').value !== 'default') {
+                        await audio.setSinkId(document.getElementById('audioOutput').value);
+                    }
+                    audio.play();
                 }
-                audio.play();
             }
         });
 
-        // --- DEVICE SETUP ---
         async function initDevices() {
             const devs = await navigator.mediaDevices.enumerateDevices();
             devs.forEach(d => {
