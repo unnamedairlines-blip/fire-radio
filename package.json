@@ -1,16 +1,12 @@
 {
-  "name": "fire-radio-desktop",
+  "name": "fire-radio",
   "version": "1.0.0",
-  "main": "main.js",
+  "main": "server.js",
   "scripts": {
-    "start": "electron .",
-    "build": "electron-builder"
+    "start": "node server.js"
   },
   "dependencies": {
-    "socket.io-client": "^4.7.2"
-  },
-  "devDependencies": {
-    "electron": "^25.0.0",
-    "electron-builder": "^24.6.3"
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
   }
 }
