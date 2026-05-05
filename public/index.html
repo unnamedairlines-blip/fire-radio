@@ -4,57 +4,34 @@
     <meta charset="UTF-8">
     <title>Fire Radio Console</title>
     <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            text-align: center; 
-            background: #121212; 
-            color: #e0e0e0; 
-            margin: 0; 
-            padding: 40px;
-            -webkit-app-region: drag; /* Allows you to drag the window by the background */
-        }
-        .container {
-            border: 2px solid #333;
-            border-radius: 15px;
-            padding: 30px;
-            background: #1e1e1e;
-        }
-        #status-light {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: gray;
-            display: inline-block;
-            margin-right: 10px;
-        }
-        .connected { background: #00ff00 !important; box-shadow: 0 0 10px #00ff00; }
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #121212; color: #e0e0e0; padding: 40px; }
+        .container { border: 2px solid #333; border-radius: 15px; padding: 30px; background: #1e1e1e; max-width: 600px; margin: auto; }
+        #status-light { width: 15px; height: 15px; border-radius: 50%; background: gray; display: inline-block; margin-right: 10px; }
+        .connected { background: #00ff00 !important; }
         .live { background: #ff0000 !important; box-shadow: 0 0 10px #ff0000; }
         
-        button {
-            -webkit-app-region: no-drag;
-            background: #333;
-            color: white;
-            border: none;
-            padding: 20px 50px;
-            font-size: 20px;
-            font-weight: bold;
-            border-radius: 50px;
-            cursor: pointer;
-            transition: 0.3s;
-            margin-top: 20px;
+        .controls { display: flex; gap: 20px; justify-content: center; margin-top: 30px; }
+        button { 
+            background: #333; color: white; border: none; padding: 15px 30px; 
+            font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.3s;
         }
         button:hover { background: #444; }
-        .btn-live { background: #990000; }
+        .btn-broadcast.active { background: #990000; }
+        .btn-listen.active { background: #005599; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>FIRE RADIO DESKTOP</h1>
+        <h1>FIRE RADIO</h1>
         <div>
             <span id="status-light"></span>
-            <span id="status-text">DISCONNECTED</span>
+            <span id="status-text">CONNECTING...</span>
         </div>
-        <button id="broadcastBtn">START LIVE STREAM</button>
+
+        <div class="controls">
+            <button id="broadcastBtn" class="btn-broadcast">GO LIVE</button>
+            <button id="listenBtn" class="btn-listen">START LISTENING</button>
+        </div>
     </div>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -62,45 +39,55 @@
         const socket = io("https://fire-radio.onrender.com");
         const statusLight = document.getElementById('status-light');
         const statusText = document.getElementById('status-text');
-        const btn = document.getElementById('broadcastBtn');
+        
+        const broadcastBtn = document.getElementById('broadcastBtn');
+        const listenBtn = document.getElementById('listenBtn');
         
         let isLive = false;
+        let isListening = false;
         let recorder;
+        let audioContext;
 
         socket.on('connect', () => {
             statusLight.className = 'connected';
             statusText.innerText = "CONNECTED TO CLOUD";
         });
 
-        socket.on('disconnect', () => {
-            statusLight.className = '';
-            statusText.innerText = "DISCONNECTED";
-        });
-
-        btn.onclick = async () => {
+        // --- BROADCASTER LOGIC ---
+        broadcastBtn.onclick = async () => {
             if (!isLive) {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 recorder = new MediaRecorder(stream);
-                
-                recorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) socket.emit('audio-data', e.data);
-                };
-
+                recorder.ondataavailable = (e) => { if (e.data.size > 0) socket.emit('audio-data', e.data); };
                 recorder.start(200);
                 isLive = true;
-                btn.innerText = "STOP TRANSMISSION";
-                btn.classList.add('btn-live');
+                broadcastBtn.innerText = "STOP LIVE";
+                broadcastBtn.classList.add('active');
                 statusLight.className = 'live';
-                statusText.innerText = "ON THE AIR";
             } else {
                 recorder.stop();
                 isLive = false;
-                btn.innerText = "START LIVE STREAM";
-                btn.classList.remove('btn-live');
+                broadcastBtn.innerText = "GO LIVE";
+                broadcastBtn.classList.remove('active');
                 statusLight.className = 'connected';
-                statusText.innerText = "CONNECTED TO CLOUD";
             }
         };
+
+        // --- LISTENER LOGIC ---
+        listenBtn.onclick = () => {
+            isListening = !isListening;
+            listenBtn.innerText = isListening ? "STOP LISTENING" : "START LISTENING";
+            listenBtn.classList.toggle('active');
+        };
+
+        socket.on('audio-stream', (audioData) => {
+            if (isListening) {
+                const blob = new Blob([audioData], { type: 'audio/webm' });
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                audio.play();
+            }
+        });
     </script>
 </body>
 </html>

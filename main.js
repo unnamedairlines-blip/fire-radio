@@ -5,18 +5,17 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1000,
     height: 800,
-    title: "Fire Radio Desktop Console",
-    icon: path.join(__currentname, 'icon.ico'), // Optional: if you have an icon
+    title: "Fire Radio Desktop",
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     }
   });
 
-  // This tells Electron to ignore the browser tab and load your local UI
-  win.loadFile(path.join(__currentname, 'public/index.html'));
+  // Fixed the variable name to __dirname
+  win.loadFile(path.join(__dirname, 'public/index.html'));
 
-  // Removes the top menu bar (File, Edit, etc.) for a professional app look
+  // Professional look: hide the default top menu
   win.setMenuBarVisibility(false);
 }
 
