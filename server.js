@@ -15,12 +15,13 @@ io.on('connection', (socket) => {
     socket.on('update-status', (status) => {
         unitRegistry[socket.id] = {
             callsign: status.callsign,
-            activeChannel: status.activeChannel // Only one active channel for speaking
+            activeChannel: status.activeChannel
         };
         io.emit('unit-list-update', unitRegistry);
     });
 
     socket.on('audio-data', (packet) => {
+        // Relay the audio packet to all other connected units
         socket.broadcast.emit('audio-stream', packet);
     });
 
