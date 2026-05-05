@@ -1,12 +1,25 @@
 {
-  "name": "fire-radio",
+  "name": "fire-radio-desktop",
   "version": "1.0.0",
-  "main": "server.js",
+  "description": "Desktop Radio Broadcasting Console",
+  "main": "main.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "electron .",
+    "build": "electron-builder"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "socket.io": "^4.7.2"
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.fireradio.app",
+    "win": {
+      "target": "portable"
+    }
   }
 }

@@ -3,29 +3,24 @@ const path = require('path');
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 900,
-    height: 700,
-    title: "Fire Radio Desktop",
+    width: 1000,
+    height: 800,
+    title: "Fire Radio Desktop Console",
+    icon: path.join(__currentname, 'icon.ico'), // Optional: if you have an icon
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     }
   });
 
-  // Load the local HTML file
-  win.loadFile('public/index.html');
+  // This tells Electron to ignore the browser tab and load your local UI
+  win.loadFile(path.join(__currentname, 'public/index.html'));
 
-  // Optional: Uncomment the line below to open dev tools automatically for debugging
-  // win.webContents.openDevTools();
+  // Removes the top menu bar (File, Edit, etc.) for a professional app look
+  win.setMenuBarVisibility(false);
 }
 
-app.whenReady().then(() => {
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
