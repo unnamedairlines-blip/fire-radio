@@ -1,7 +1,17 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, session } = require('electron');
 const path = require('path');
 
+function allowMicrophoneAccess() {
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(permission === 'media');
+  });
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => permission === 'media');
+}
+
 function createWindow() {
+  allowMicrophoneAccess();
+
   const win = new BrowserWindow({
     width: 1100,
     height: 850,
