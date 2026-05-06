@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio | Stable V14</title>
-    <link rel="icon" href="data:,">
+    <title>Fire Radio | Pro Stable V15</title>
     <style>
         :root { --bg: #0d1117; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
         body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; }
@@ -14,7 +13,7 @@
         .ptt-btn.active { background: var(--red); box-shadow: 0 0 30px rgba(248, 81, 73, 0.5); transform: scale(0.98); }
         .unit-list { background: #0d1117; height: 180px; overflow-y: auto; padding: 10px; border-radius: 6px; font-size: 14px; border: 1px solid #30363d; margin: 15px 0; }
         .unit-tag { padding: 8px; border-left: 4px solid var(--green); background: #21262d; margin-bottom: 6px; border-radius: 0 4px 4px 0; font-family: monospace; }
-        .conn-btn { width: 100%; padding: 12px; font-weight: bold; border-radius: 6px; border: none; background: #30363d; color: white; cursor: pointer; margin-bottom: 15px; transition: 0.3s; }
+        .conn-btn { width: 100%; padding: 12px; font-weight: bold; border-radius: 6px; border: none; background: #30363d; color: white; cursor: pointer; margin-bottom: 15px; }
         .conn-btn.active { background: var(--accent); }
         select, input { width: 100%; padding: 12px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; margin-bottom: 10px; }
         label { font-size: 11px; color: #8b949e; text-transform: uppercase; font-weight: bold; }
@@ -43,7 +42,7 @@
             <label>Units on Frequency</label>
             <div class="unit-list" id="unitList">No units connected</div>
             <button class="ptt-btn" id="pttBtn" disabled>OFF AIR</button>
-            <p style="font-size: 11px; color: #8b949e; margin-top: 15px; text-align: center;">Drift Guard: ACTIVE (Auto-Resync enabled)</p>
+            <p style="font-size: 11px; color: #8b949e; margin-top: 15px; text-align: center;">Resampling & Stream-Sync: ENABLED</p>
         </div>
     </div>
 </div>
@@ -59,9 +58,10 @@
             process(ins) {
                 const input = ins[0][0];
                 if (!input) return true;
-                let hasSound = false;
-                for(let i=0; i<input.length; i++) { if(Math.abs(input[i]) > 0.015) { hasSound = true; break; } }
-                this.port.postMessage(hasSound ? input : new Float32Array(input.length));
+                // Instant noise check
+                let quiet = true;
+                for(let i=0; i<input.length; i++) { if(Math.abs(input[i]) > 0.01) { quiet = false; break; } }
+                this.port.postMessage(quiet ? new Float32Array(input.length) : input);
                 return true;
             }
         }
@@ -79,7 +79,6 @@
         osc.start(); osc.stop(audioCtx.currentTime + dur);
     }
 
-    // --- KEYBINDING ---
     document.getElementById('keybindBtn').onclick = () => { isBinding = true; document.getElementById('keybindBtn').innerText = "PUSH KEY..."; };
     window.onkeydown = (e) => {
         if (isBinding) {
@@ -91,11 +90,11 @@
     };
     window.onkeyup = (e) => { if (e.code === pttKey) stopTX(); };
 
-    // --- CONNECTION ---
     document.getElementById('connBtn').onclick = async () => {
         active = !active;
         if (!audioCtx) {
-            audioCtx = new AudioContext();
+            // Force 44100Hz to ensure all browsers match
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
             await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type:'application/javascript'})));
         }
         updateUI();
@@ -116,22 +115,34 @@
         ptt.innerText = active ? `HOLD ${pttKey.replace('Key','')}` : "OFF AIR";
     }
 
-    // --- TRANSMIT ---
     async function startTX() {
         if (isTalking) return;
         isTalking = true;
         playBeep(1000, 0.06);
         document.getElementById('pttBtn').classList.add('active');
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true, noiseSuppression: true } });
+        
+        micStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
+        });
+
         const source = audioCtx.createMediaStreamSource(micStream);
-        const hp = audioCtx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 250;
+        
+        // Low Pass Filter to remove the high-frequency "static" that causes drift
+        const lp = audioCtx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 6000;
+
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
         workletNode.port.onmessage = (e) => {
             const int16 = new Int16Array(e.data.length);
-            for (let i = 0; i < e.data.length; i++) int16[i] = Math.max(-1, Math.min(1, e.data[i] * 1.5)) * 0x7FFF;
+            for (let i = 0; i < e.data.length; i++) {
+                int16[i] = Math.max(-1, Math.min(1, e.data[i])) * 0x7FFF;
+            }
             socket.emit('audio-packet', { call: document.getElementById('callsign').value, data: int16.buffer });
         };
-        source.connect(hp); hp.connect(workletNode);
+
+        source.connect(lp);
+        lp.connect(workletNode);
     }
 
     function stopTX() {
@@ -143,25 +154,26 @@
         if (micStream) micStream.getTracks().forEach(t => t.stop());
     }
 
-    // --- RECEIVE (DRIFT CORRECTION) ---
+    // --- RECEIVE (FORCED SYNC) ---
     socket.on('audio-out', (p) => {
-        if (p.call === document.getElementById('callsign').value || !active) return;
+        if (p.call === document.getElementById('callsign').value || !active || !audioCtx) return;
+        
         const int16 = new Int16Array(p.data);
         const f32 = new Float32Array(int16.length);
         for(let i=0; i<int16.length; i++) f32[i] = int16[i] / 0x7FFF;
         
         const buf = audioCtx.createBuffer(1, f32.length, audioCtx.sampleRate);
         buf.getChannelData(0).set(f32);
+        
         const src = audioCtx.createBufferSource();
         src.buffer = buf;
         src.connect(audioCtx.destination);
         
         const now = audioCtx.currentTime;
-        const BASE_LATENCY = 0.12; // 120ms buffer
 
-        // If audio queue is too old (>300ms) or empty, reset to 120ms in the future
-        if (nextStartTime < now || nextStartTime > now + 0.3) {
-            nextStartTime = now + BASE_LATENCY;
+        // If the gap between packets is too large, reset to a 100ms cushion
+        if (nextStartTime < now || nextStartTime > now + 0.2) {
+            nextStartTime = now + 0.1;
         }
 
         src.start(nextStartTime);
