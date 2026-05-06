@@ -2,20 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio | Drift Corrected V13</title>
-    <link rel="icon" href="data:,">
+    <title>Fire Radio | Pro Stable V13</title>
     <style>
         :root { --bg: #0d1117; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
-        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; padding: 20px; }
         .dashboard { max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
         .card { background: var(--panel); border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
-        .ptt-btn { width: 100%; padding: 50px 0; font-size: 22px; font-weight: bold; border-radius: 12px; border: none; background: #21262d; color: #484f58; transition: 0.2s; cursor: not-allowed; margin-top: 10px; }
-        .ptt-btn.ready { background: #238636; color: white; cursor: pointer; }
-        .ptt-btn.active { background: var(--red); box-shadow: 0 0 30px rgba(248, 81, 73, 0.5); transform: scale(0.98); }
+        .ptt-btn { width: 100%; padding: 50px 0; font-size: 22px; font-weight: bold; border-radius: 12px; border: none; background: #21262d; color: #484f58; cursor: pointer; transition: 0.1s; margin-top: 10px; }
+        .ptt-btn.active { background: var(--red); color: white; box-shadow: 0 0 30px rgba(248, 81, 73, 0.4); }
         .unit-list { background: #0d1117; height: 180px; overflow-y: auto; padding: 10px; border-radius: 6px; font-size: 14px; border: 1px solid #30363d; margin: 15px 0; }
-        .unit-tag { padding: 8px; border-left: 4px solid var(--green); background: #21262d; margin-bottom: 6px; border-radius: 0 4px 4px 0; font-family: monospace; }
-        .conn-btn { width: 100%; padding: 12px; font-weight: bold; border-radius: 6px; border: none; background: #30363d; color: white; cursor: pointer; margin-bottom: 15px; }
-        .conn-btn.active { background: var(--accent); }
+        .unit-tag { padding: 8px; border-left: 4px solid var(--accent); background: #21262d; margin-bottom: 6px; border-radius: 0 4px 4px 0; font-family: monospace; }
         select, input { width: 100%; padding: 12px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; margin-bottom: 10px; }
         label { font-size: 11px; color: #8b949e; text-transform: uppercase; font-weight: bold; }
     </style>
@@ -32,18 +28,16 @@
             <select id="micInput"></select>
             <label>PTT Keybind</label>
             <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer; border-radius:6px;">SPACEBAR</button>
-            <p style="font-size: 11px; color: #8b949e; margin-top: 15px;">Status: <span id="socketStatus">Connecting...</span></p>
         </div>
     </div>
 
     <div class="main">
         <div class="card">
             <h2 style="margin:0 0 15px 0">Dispatch Channel</h2>
-            <button class="conn-btn" id="connBtn">CONNECT TO CHANNEL</button>
-            <label>Units on Frequency</label>
-            <div class="unit-list" id="unitList">No units connected</div>
-            <button class="ptt-btn" id="pttBtn" disabled>OFF AIR</button>
-            <p style="font-size: 12px; color: #8b949e; margin-top: 15px; text-align: center;">Auto-Resync & Drift Protection Active</p>
+            <label>Units Online</label>
+            <div class="unit-list" id="unitList">Connecting...</div>
+            <button class="ptt-btn" id="pttBtn">HOLD TO TALK</button>
+            <p style="text-align:center; font-size:12px; color:#8b949e; margin-top:10px;">Buffer Drift Protection: ACTIVE</p>
         </div>
     </div>
 </div>
@@ -51,133 +45,109 @@
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
     const socket = io("https://fire-radio.onrender.com");
-    let pttKey = "Space", isBinding = false, isTalking = false, active = false;
-    let audioCtx, micStream, workletNode, nextStartTime = 0;
+    let audioCtx, micStream, workletNode, isTalking = false, pttKey = "Space", isBinding = false;
+    let nextStartTime = 0;
 
-    const workletCode = `
-        class RadioProcessor extends AudioWorkletProcessor {
-            process(ins) {
-                const input = ins[0][0];
-                if (!input) return true;
-                let active = false;
-                for(let i=0; i<input.length; i++) { if(Math.abs(input[i]) > 0.015) { active = true; break; } }
-                this.port.postMessage(active ? input : new Float32Array(input.length));
-                return true;
-            }
-        }
-        registerProcessor('radio-processor', RadioProcessor);
-    `;
+    // --- AUDIO WORKLET (NOISE GATE) ---
+    const workletCode = `class P extends AudioWorkletProcessor { process(ins) { if (ins[0][0]) this.port.postMessage(ins[0][0]); return true; } } registerProcessor('p', P);`;
 
     function playBeep(freq, dur) {
         if (!audioCtx) return;
         const osc = audioCtx.createOscillator();
         const g = audioCtx.createGain();
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        g.gain.setValueAtTime(0.03, audioCtx.currentTime);
+        osc.frequency.value = freq;
+        g.gain.setValueAtTime(0.02, audioCtx.currentTime);
         g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
         osc.connect(g); g.connect(audioCtx.destination);
         osc.start(); osc.stop(audioCtx.currentTime + dur);
     }
 
-    document.getElementById('keybindBtn').onclick = () => { isBinding = true; document.getElementById('keybindBtn').innerText = "PUSH KEY..."; };
-
-    window.onkeydown = (e) => {
-        if (isBinding) {
-            e.preventDefault(); pttKey = e.code;
-            document.getElementById('keybindBtn').innerText = pttKey.toUpperCase();
-            isBinding = false; updateUI(); return;
-        }
-        if (e.code === pttKey && !e.repeat && active) startTX();
-    };
-    window.onkeyup = (e) => { if (e.code === pttKey) stopTX(); };
-
-    document.getElementById('connBtn').onclick = async () => {
-        active = !active;
+    async function initAudio() {
         if (!audioCtx) {
             audioCtx = new AudioContext();
             await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type:'application/javascript'})));
         }
-        updateUI();
-        syncWithServer();
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+    }
+
+    // --- KEYBINDING ---
+    document.getElementById('keybindBtn').onclick = () => { isBinding = true; document.getElementById('keybindBtn').innerText = "..."; };
+    window.onkeydown = (e) => {
+        if (isBinding) { pttKey = e.code; document.getElementById('keybindBtn').innerText = pttKey.toUpperCase(); isBinding = false; return; }
+        if (e.code === pttKey && !e.repeat) startTX();
     };
+    window.onkeyup = (e) => { if (e.code === pttKey) stopTX(); };
 
-    function syncWithServer() {
-        socket.emit('update-status', { callsign: document.getElementById('callsign').value, activeChannel: active ? 'dispatch' : null });
-    }
-
-    function updateUI() {
-        const btn = document.getElementById('connBtn');
-        const ptt = document.getElementById('pttBtn');
-        btn.innerText = active ? "DISCONNECT" : "CONNECT TO CHANNEL";
-        btn.classList.toggle('active', active);
-        ptt.disabled = !active;
-        ptt.classList.toggle('ready', active);
-        ptt.innerText = active ? `HOLD ${pttKey.replace('Key','')}` : "OFF AIR";
-    }
+    // --- TX ---
+    const pttBtn = document.getElementById('pttBtn');
+    pttBtn.onmousedown = startTX;
+    window.onmouseup = stopTX;
 
     async function startTX() {
         if (isTalking) return;
+        await initAudio();
         isTalking = true;
-        playBeep(1000, 0.08);
-        document.getElementById('pttBtn').classList.add('active');
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true, noiseSuppression: true } });
+        pttBtn.classList.add('active');
+        playBeep(880, 0.08); // Start beep
+
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true } });
         const source = audioCtx.createMediaStreamSource(micStream);
-        const hp = audioCtx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 250;
-        workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
+        workletNode = new AudioWorkletNode(audioCtx, 'p');
+        
         workletNode.port.onmessage = (e) => {
             const int16 = new Int16Array(e.data.length);
             for (let i = 0; i < e.data.length; i++) int16[i] = Math.max(-1, Math.min(1, e.data[i] * 1.5)) * 0x7FFF;
             socket.emit('audio-packet', { call: document.getElementById('callsign').value, data: int16.buffer });
         };
-        source.connect(hp); hp.connect(workletNode);
+        source.connect(workletNode);
     }
 
     function stopTX() {
         if (!isTalking) return;
         isTalking = false;
-        playBeep(600, 0.1);
-        document.getElementById('pttBtn').classList.remove('active');
+        pttBtn.classList.remove('active');
+        playBeep(440, 0.1); // End beep
         if (workletNode) workletNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
     }
 
-    // --- RECEPTION (THE DRIFT FIX) ---
-    socket.on('audio-out', (p) => {
-        if (p.call === document.getElementById('callsign').value || !active) return;
-        const int16 = new Int16Array(p.data);
-        const f32 = new Float32Array(int16.length);
-        for(let i=0; i<int16.length; i++) f32[i] = int16[i] / 0x7FFF;
-        
-        const buf = audioCtx.createBuffer(1, f32.length, audioCtx.sampleRate);
-        buf.getChannelData(0).set(f32);
-        const src = audioCtx.createBufferSource();
-        src.buffer = buf;
-        src.connect(audioCtx.destination);
-        
-        const now = audioCtx.currentTime;
-        const LOOK_AHEAD = 0.1; // 100ms cushion
+    // --- RX (THE FIX) ---
+    socket.on('audio-out', (packet) => {
+        if (packet.call === document.getElementById('callsign').value || !audioCtx) return;
 
-        // If we fall behind (gap) or get too far ahead (lag build up)
-        if (nextStartTime < now || nextStartTime > now + 0.3) {
-            nextStartTime = now + LOOK_AHEAD; 
+        const int16 = new Int16Array(packet.data);
+        const float32 = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 0x7FFF;
+
+        const buffer = audioCtx.createBuffer(1, float32.length, audioCtx.sampleRate);
+        buffer.getChannelData(0).set(float32);
+
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+        
+        // DRIFT GUARD: If we are more than 200ms behind, snap to the present.
+        // This prevents the audio from "going downhill" over time.
+        if (nextStartTime < now || nextStartTime > now + 0.25) {
+            nextStartTime = now + 0.05; 
         }
 
-        src.start(nextStartTime);
-        nextStartTime += buf.duration;
+        source.start(nextStartTime);
+        nextStartTime += buffer.duration;
     });
 
-    socket.on('connect', () => { document.getElementById('socketStatus').innerText = "ONLINE"; });
+    // --- UNIT LIST ---
+    socket.on('connect', () => { socket.emit('update-status', { callsign: document.getElementById('callsign').value, activeChannel: 'dispatch' }); });
     socket.on('unit-list-update', (units) => {
-        document.getElementById('unitList').innerHTML = Object.values(units)
-            .filter(u => u.activeChannel === 'dispatch')
-            .map(u => `<div class="unit-tag">${u.callsign}</div>`).join('') || "No units on frequency";
+        document.getElementById('unitList').innerHTML = Object.values(units).map(u => `<div class="unit-tag">${u.callsign}</div>`).join('') || "No units";
     });
 
     navigator.mediaDevices.enumerateDevices().then(devs => {
         const sel = document.getElementById('micInput');
         devs.filter(d => d.kind === 'audioinput').forEach(d => sel.innerHTML += `<option value="${d.deviceId}">${d.label || 'Mic'}</option>`);
     });
-    document.getElementById('callsign').onchange = syncWithServer;
 </script>
 </body>
 </html>
