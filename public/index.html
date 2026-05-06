@@ -2,26 +2,19 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio Console | AudioWorklet Edition</title>
+    <title>Fire Radio | Clear Voice V5</title>
     <style>
         :root { --bg: #0b0e14; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
-        body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 20px; margin:0; }
-        .grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; max-width: 1400px; margin: 0 auto; }
+        body { background: var(--bg); color: var(--text); font-family: sans-serif; padding: 20px; margin:0; }
+        .grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
         .card { background: var(--panel); border: 1px solid #30363d; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
-        
         .ptt-btn { width: 100%; padding: 40px 0; font-size: 20px; font-weight: bold; border-radius: 8px; border: 2px solid #30363d; background: #21262d; color: #484f58; transition: 0.2s; cursor: not-allowed; text-transform: uppercase; }
         .ptt-btn.ready { background: #238636; color: white; cursor: pointer; border-color: #2ea043; }
         .ptt-btn.active { background: var(--red); border-color: #da3633; box-shadow: 0 0 20px rgba(248, 81, 73, 0.4); }
-
-        .meter { height: 8px; background: #000; border-radius: 4px; margin-top: 10px; overflow: hidden; display: none; }
-        .meter-bar { height: 100%; width: 0%; background: var(--green); transition: width 0.05s; }
-
         .unit-list { background: #0d1117; height: 250px; overflow-y: auto; padding: 10px; border-radius: 4px; font-size: 13px; border: 1px solid #30363d; margin: 10px 0; }
-        .unit { padding: 6px 10px; border-left: 3px solid var(--green); margin-bottom: 5px; background: #1c2128; border-radius: 0 4px 4px 0; }
-        
-        .btn-conn { width: 100%; padding: 12px; font-weight: bold; cursor: pointer; background: #30363d; color: white; border: none; border-radius: 6px; margin-bottom: 10px; transition: 0.2s; }
+        .unit { padding: 6px 10px; border-left: 3px solid var(--green); margin-bottom: 5px; background: #1c2128; }
+        .btn-conn { width: 100%; padding: 12px; font-weight: bold; cursor: pointer; background: #30363d; color: white; border: none; border-radius: 6px; margin-bottom: 10px; }
         .btn-conn.active { background: var(--accent); }
-        
         select, input { width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; }
         label { font-size: 11px; color: #8b949e; text-transform: uppercase; display: block; margin-bottom: 5px; font-weight: 600; }
     </style>
@@ -31,27 +24,17 @@
 <div class="grid">
     <div class="sidebar">
         <div class="card">
-            <h2 style="margin-top:0; color:var(--accent)">System Setup</h2>
-            <div style="margin-bottom:15px">
-                <label>Unit Callsign</label>
-                <input type="text" id="callsign" value="UNIT-1" oninput="updateStatus()">
-            </div>
-            <div style="margin-bottom:15px">
-                <label>PTT Keybind</label>
-                <button id="keybindBtn" style="width:100%; padding:10px; cursor:pointer; background:#21262d; color:white; border:1px solid #30363d; border-radius:4px;">SPACEBAR</button>
-            </div>
-            <div style="margin-bottom:15px">
-                <label>Microphone</label>
-                <select id="micInput"></select>
-            </div>
-            <div class="meter" id="micMeter"><div class="meter-bar" id="micBar"></div></div>
+            <h2 style="margin-top:0">Radio Settings</h2>
+            <div style="margin-bottom:15px"><label>Callsign</label><input type="text" id="callsign" value="UNIT-1" oninput="updateStatus()"></div>
+            <div style="margin-bottom:15px"><label>PTT Key</label><button id="keybindBtn" style="width:100%; padding:10px; cursor:pointer; background:#21262d; color:white; border:1px solid #30363d;">SPACEBAR</button></div>
+            <div style="margin-bottom:15px"><label>Mic</label><select id="micInput"></select></div>
         </div>
     </div>
 
     <div class="main">
         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
             <div class="card">
-                <h3>Fire RTO (Dispatch)</h3>
+                <h3>Main Dispatch</h3>
                 <button class="btn-conn" data-chan="fire-rto">CONNECT</button>
                 <div class="unit-list" id="list-fire-rto"></div>
                 <button class="ptt-btn" id="ptt-fire-rto" disabled>OFF AIR</button>
@@ -64,21 +47,30 @@
 <script>
     const socket = io("https://fire-radio.onrender.com");
     let pttKey = "Space";
-    let isBinding = false;
-    let activeChannel = null;
-    let isTalking = false;
-
-    // --- Audio System ---
+    let isBinding = false, activeChannel = null, isTalking = false;
     let audioCtx, micStream, workletNode;
+    
+    // Scheduling variables
+    let nextStartTime = 0;
+    const JITTER_DELAY = 0.1; // 100ms safety buffer
 
-    // We define the Worklet code as a string so we don't need a separate file
     const workletCode = `
         class RadioProcessor extends AudioWorkletProcessor {
+            constructor() {
+                super();
+                this.buffer = new Float32Array(4096);
+                this.offset = 0;
+            }
             process(inputs, outputs, parameters) {
-                const input = inputs[0];
-                if (input.length > 0) {
-                    const channelData = input[0];
-                    this.port.postMessage(channelData);
+                const input = inputs[0][0];
+                if (!input) return true;
+                
+                for (let i = 0; i < input.length; i++) {
+                    this.buffer[this.offset++] = input[i];
+                    if (this.offset >= this.buffer.length) {
+                        this.port.postMessage(this.buffer);
+                        this.offset = 0;
+                    }
                 }
                 return true;
             }
@@ -86,44 +78,30 @@
         registerProcessor('radio-processor', RadioProcessor);
     `;
 
-    // --- 1. Keybind Handling ---
     const keyBtn = document.getElementById('keybindBtn');
-    keyBtn.onclick = () => { 
-        isBinding = true; 
-        keyBtn.innerText = "Listening..."; 
-        keyBtn.style.borderColor = "var(--accent)";
-    };
+    keyBtn.onclick = () => { isBinding = true; keyBtn.innerText = "Press key..."; };
 
     window.onkeydown = (e) => {
         if (isBinding) {
-            e.preventDefault();
-            pttKey = e.code;
+            e.preventDefault(); pttKey = e.code;
             keyBtn.innerText = pttKey.replace('Key', '').toUpperCase();
-            keyBtn.style.borderColor = "#30363d";
-            isBinding = false;
-            updateUI();
-            return;
+            isBinding = false; updateUI(); return;
         }
         if (e.code === pttKey && !e.repeat) startTX();
     };
     window.onkeyup = (e) => { if (e.code === pttKey) stopTX(); };
 
-    // --- 2. Connection & UI ---
     document.querySelectorAll('.btn-conn').forEach(btn => {
         btn.onclick = async () => {
             const chan = btn.dataset.chan;
             activeChannel = (activeChannel === chan) ? null : chan;
-            
             if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
                 const blob = new Blob([workletCode], { type: 'application/javascript' });
-                const url = URL.createObjectURL(blob);
-                await audioCtx.audioWorklet.addModule(url);
+                await audioCtx.audioWorklet.addModule(URL.createObjectURL(blob));
             }
             if (audioCtx.state === 'suspended') await audioCtx.resume();
-            
-            updateUI();
-            updateStatus();
+            updateUI(); updateStatus();
         };
     });
 
@@ -132,10 +110,7 @@
             const chan = btn.dataset.chan;
             const ptt = document.getElementById(`ptt-${chan}`);
             const isActive = (activeChannel === chan);
-            
             btn.classList.toggle('active', isActive);
-            btn.innerText = isActive ? "CONNECTED" : "CONNECT";
-            
             if (ptt) {
                 ptt.disabled = !isActive;
                 ptt.classList.toggle('ready', isActive);
@@ -145,85 +120,61 @@
     }
 
     function updateStatus() {
-        socket.emit('update-status', {
-            callsign: document.getElementById('callsign').value,
-            activeChannel: activeChannel
-        });
+        socket.emit('update-status', { callsign: document.getElementById('callsign').value, activeChannel });
     }
 
     socket.on('unit-list-update', (reg) => {
-        const list = document.getElementById('list-fire-rto');
-        list.innerHTML = Object.values(reg)
-            .filter(u => u.activeChannel === 'fire-rto')
-            .map(u => `<div class="unit">${u.callsign}</div>`).join('');
+        document.getElementById('list-fire-rto').innerHTML = Object.values(reg)
+            .filter(u => u.activeChannel === 'fire-rto').map(u => `<div class="unit">${u.callsign}</div>`).join('');
     });
 
-    // --- 3. Transmission (The Engine) ---
     async function startTX() {
         if (!activeChannel || isTalking) return;
         isTalking = true;
-        
         document.getElementById(`ptt-${activeChannel}`).classList.add('active');
-        document.getElementById('micMeter').style.display = 'block';
-
-        micStream = await navigator.mediaDevices.getUserMedia({ 
-            audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true, noiseSuppression: true } 
-        });
-        
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true, noiseSuppression: true } });
         const source = audioCtx.createMediaStreamSource(micStream);
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
-
         workletNode.port.onmessage = (e) => {
-            const floatData = e.data;
-            const int16Data = new Int16Array(floatData.length);
-            let vol = 0;
-            for (let i = 0; i < floatData.length; i++) {
-                const s = Math.max(-1, Math.min(1, floatData[i]));
-                int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                vol += Math.abs(s);
+            const int16 = new Int16Array(e.data.length);
+            for (let i = 0; i < e.data.length; i++) {
+                int16[i] = Math.max(-1, Math.min(1, e.data[i])) * 0x7FFF;
             }
-            // Update Mic Meter
-            document.getElementById('micBar').style.width = Math.min(100, (vol / floatData.length * 400)) + "%";
-
-            socket.emit('audio-packet', {
-                chan: activeChannel,
-                call: document.getElementById('callsign').value.toUpperCase(),
-                data: int16Data.buffer
-            });
+            socket.emit('audio-packet', { chan: activeChannel, call: document.getElementById('callsign').value.toUpperCase(), data: int16.buffer });
         };
-
         source.connect(workletNode);
-        workletNode.connect(audioCtx.destination);
     }
 
     function stopTX() {
-        if (!isTalking) return;
         isTalking = false;
         if (workletNode) workletNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
         if (activeChannel) document.getElementById(`ptt-${activeChannel}`).classList.remove('active');
-        document.getElementById('micMeter').style.display = 'none';
     }
 
-    // --- 4. Reception ---
     socket.on('audio-out', (packet) => {
-        if (packet.call === document.getElementById('callsign').value.toUpperCase()) return;
-        if (packet.chan !== activeChannel) return;
+        if (packet.call === document.getElementById('callsign').value.toUpperCase() || packet.chan !== activeChannel) return;
 
         const int16 = new Int16Array(packet.data);
         const float32 = new Float32Array(int16.length);
-        for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 0x8000;
+        for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 0x7FFF;
 
         const buffer = audioCtx.createBuffer(1, float32.length, audioCtx.sampleRate);
         buffer.getChannelData(0).set(float32);
-        
+
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
         source.connect(audioCtx.destination);
-        source.start();
+
+        // --- THE FIX: SCHEDULING ---
+        const now = audioCtx.currentTime;
+        if (nextStartTime < now) {
+            nextStartTime = now + JITTER_DELAY;
+        }
+        source.start(nextStartTime);
+        nextStartTime += buffer.duration;
     });
 
-    // Mic List
     navigator.mediaDevices.enumerateDevices().then(devs => {
         const sel = document.getElementById('micInput');
         devs.filter(d => d.kind === 'audioinput').forEach(d => {
