@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio | Ultra-Stable V6</title>
+    <title>Fire Radio | Ultra-Stable V6.1</title>
+    <!-- This stops the annoying favicon.ico 404 error -->
+    <link rel="icon" href="data:,">
     <style>
         :root { --bg: #0d1117; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
         body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; }
@@ -50,13 +52,13 @@
     const socket = io("https://fire-radio.onrender.com");
     let pttKey = "Space", isBinding = false, isTalking = false, active = false;
     let audioCtx, micStream, workletNode, nextStartTime = 0;
-    const JITTER_BUFFER = 0.2; // 200ms delay for smoothness
 
     const workletCode = `
         class RadioProcessor extends AudioWorkletProcessor {
             constructor() { 
                 super(); 
-                this.buf = new Float32Array(2048); 
+                // Reduced from 2048 to 1024 to make the PTT button feel faster
+                this.buf = new Float32Array(1024); 
                 this.ptr = 0; 
             }
             process(ins) {
@@ -134,7 +136,7 @@
         document.getElementById('pttBtn').classList.remove('active');
     }
 
-    // --- RECEPTION ---
+    // --- RECEPTION (With Anti-Drift Sync) ---
     socket.on('audio-out', (packet) => {
         if (packet.call === document.getElementById('callsign').value || !active) return;
 
@@ -147,12 +149,21 @@
 
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
-        
-        // Anti-Crackling Scheduling
-        const now = audioCtx.currentTime;
-        if (nextStartTime < now) nextStartTime = now + JITTER_BUFFER;
-        
         source.connect(audioCtx.destination);
+        
+        const now = audioCtx.currentTime;
+        
+        // 1. If the queue is empty or behind, start a fresh timeline with a tiny 80ms delay
+        if (nextStartTime < now) {
+            nextStartTime = now + 0.08; 
+        } 
+        // 2. THE RUBBER BAND: If the queue builds up more than 300ms of lag, SNAP it back.
+        // This drops delayed audio instead of letting it build up into a massive delay.
+        else if (nextStartTime > now + 0.3) {
+            console.warn("Audio drifted too far, snapping back to live!");
+            nextStartTime = now + 0.08;
+        }
+        
         source.start(nextStartTime);
         nextStartTime += buffer.duration;
     });
