@@ -2,29 +2,41 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio Console</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fire Radio Console Pro</title>
     <style>
         :root {
             --bg-dark: #0f111a; --panel-bg: #1e2230; --border-color: #2e3440;
             --accent-red: #ff3e3e; --accent-green: #00e676; --accent-blue: #00b0ff;
             --text-main: #f5f6f9; --text-muted: #8892b0;
         }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; padding: 20px; }
-        .dashboard { display: grid; grid-template-columns: 320px 1fr; gap: 20px; max-width: 1400px; margin: 0 auto; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; padding: 20px; overflow-x: hidden; }
+        
+        .dashboard { display: grid; grid-template-columns: 320px 1fr; gap: 20px; max-width: 1600px; margin: 0 auto; }
+        
         .panel { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; }
         .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; }
-        input, select { width: 100%; padding: 10px; background: #121620; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; }
-        .channel-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-        .channel-card { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; min-height: 500px; display: flex; flex-direction: column; }
-        .connect-btn { width: 100%; padding: 12px; margin-bottom: 10px; cursor: pointer; border: none; font-weight: bold; background: #3b4252; color: white; border-radius: 5px; }
+        .form-group label { display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; font-weight: bold; }
+        
+        input, select { width: 100%; padding: 10px; background: #121620; border: 1px solid var(--border-color); color: var(--text-main); border-radius: 4px; box-sizing: border-box; }
+        
+        #keybindBtn { width: 100%; padding: 12px; background: #252b3d; color: var(--accent-blue); border: 1px solid var(--border-color); cursor: pointer; font-weight: bold; border-radius: 4px; transition: 0.2s; }
+        #keybindBtn.recording { background: var(--accent-red); color: white; animation: pulse 1s infinite; }
+
+        .channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .channel-card { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; min-height: 550px; display: flex; flex-direction: column; }
+        
+        .connect-btn { width: 100%; padding: 12px; margin-bottom: 10px; cursor: pointer; border-radius: 5px; border: none; font-weight: bold; background: #3b4252; color: white; transition: 0.3s; }
         .connected-active { background: var(--accent-blue) !important; }
-        .unit-list-container { flex-grow: 1; background: #121620; border-radius: 4px; margin: 10px 0; padding: 10px; font-size: 12px; border: 1px solid #252b3d; }
-        .unit-entry { padding: 6px 10px; margin-bottom: 4px; background: #1e2230; border-left: 3px solid var(--accent-green); }
-        .ptt-btn { width: 100%; padding: 25px; font-weight: bold; border-radius: 8px; border: none; background: #2a2f3a; color: #555; text-transform: uppercase; }
+
+        .unit-list-container { flex-grow: 1; background: #121620; border-radius: 4px; margin: 10px 0; padding: 10px; font-size: 13px; border: 1px solid #252b3d; overflow-y: auto; }
+        .unit-entry { padding: 6px 10px; margin-bottom: 5px; background: #1e2230; border-left: 3px solid var(--accent-green); }
+        
+        .ptt-btn { width: 100%; padding: 25px; font-weight: bold; border-radius: 8px; border: none; background: #2a2f3a; color: #555; text-transform: uppercase; letter-spacing: 1px; transition: 0.2s; }
         .can-talk { background: #256a42 !important; color: white !important; cursor: pointer !important; }
-        .transmitting { background: var(--accent-red) !important; box-shadow: 0 0 15px var(--accent-red); animation: pulse 0.8s infinite; }
-        @keyframes pulse { from { opacity: 1; } to { opacity: 0.7; } }
+        .transmitting { background: var(--accent-red) !important; box-shadow: 0 0 20px rgba(255, 62, 62, 0.4); }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
@@ -32,37 +44,59 @@
     <div class="dashboard">
         <div class="sidebar">
             <div class="panel">
-                <h2>CONSOLE SETUP</h2>
-                <div class="form-group"><label>Callsign</label><input type="text" id="callsign" value="UNIT-1"></div>
-                <div class="form-group"><label>PTT Key</label><button id="keybindBtn" style="width:100%; padding:10px; background:#252b3d; color:var(--accent-blue); border:none;">SPACEBAR</button></div>
-                <div class="form-group"><label>Mic</label><select id="micInput"></select></div>
-                <div class="form-group"><label>Speaker</label><select id="audioOutput"></select></div>
+                <h2 style="margin-top:0; color:var(--accent-blue);">CONSOLE</h2>
+                <div class="form-group">
+                    <label>Unit Callsign</label>
+                    <input type="text" id="callsign" value="UNIT-1" oninput="syncStatus()">
+                </div>
+                <div class="form-group">
+                    <label>PTT Keybind</label>
+                    <button id="keybindBtn">SPACE</button>
+                </div>
+                <div class="form-group">
+                    <label>Input Device</label>
+                    <select id="micInput"></select>
+                </div>
+                <div class="form-group">
+                    <label>Output Device</label>
+                    <select id="audioOutput"></select>
+                </div>
             </div>
         </div>
 
         <div class="main-content">
             <div class="channel-grid">
-                <div class="channel-card" id="card-fire-rto">
+                <!-- Channel 1 -->
+                <div class="channel-card">
                     <h3>Fire RTO</h3>
                     <button class="connect-btn" data-channel="fire-rto">CONNECT</button>
-                    <label style="font-size:11px"><input type="checkbox" class="monitor-toggle" data-channel="fire-rto"> MONITOR</label>
+                    <label style="font-size: 12px; color: var(--text-muted);">
+                        <input type="checkbox" class="monitor-toggle" data-channel="fire-rto"> MONITOR ONLY
+                    </label>
                     <div class="unit-list-container" id="units-fire-rto"></div>
-                    <button class="ptt-btn" id="ptt-fire-rto" disabled>PTT IDLE</button>
+                    <button class="ptt-btn" id="ptt-fire-rto" disabled>OFF AIR</button>
                 </div>
-                <!-- Repeat for Ops 1 and 2 -->
-                <div class="channel-card" id="card-ops-1">
+
+                <!-- Channel 2 -->
+                <div class="channel-card">
                     <h3>Operations 1</h3>
                     <button class="connect-btn" data-channel="ops-1">CONNECT</button>
-                    <label style="font-size:11px"><input type="checkbox" class="monitor-toggle" data-channel="ops-1"> MONITOR</label>
+                    <label style="font-size: 12px; color: var(--text-muted);">
+                        <input type="checkbox" class="monitor-toggle" data-channel="ops-1"> MONITOR ONLY
+                    </label>
                     <div class="unit-list-container" id="units-ops-1"></div>
-                    <button class="ptt-btn" id="ptt-ops-1" disabled>PTT IDLE</button>
+                    <button class="ptt-btn" id="ptt-ops-1" disabled>OFF AIR</button>
                 </div>
-                <div class="channel-card" id="card-ops-2">
+
+                <!-- Channel 3 -->
+                <div class="channel-card">
                     <h3>Operations 2</h3>
                     <button class="connect-btn" data-channel="ops-2">CONNECT</button>
-                    <label style="font-size:11px"><input type="checkbox" class="monitor-toggle" data-channel="ops-2"> MONITOR</label>
+                    <label style="font-size: 12px; color: var(--text-muted);">
+                        <input type="checkbox" class="monitor-toggle" data-channel="ops-2"> MONITOR ONLY
+                    </label>
                     <div class="unit-list-container" id="units-ops-2"></div>
-                    <button class="ptt-btn" id="ptt-ops-2" disabled>PTT IDLE</button>
+                    <button class="ptt-btn" id="ptt-ops-2" disabled>OFF AIR</button>
                 </div>
             </div>
         </div>
@@ -71,18 +105,59 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
         const socket = io("https://fire-radio.onrender.com");
-        let pttKey = " ";
-        let mediaRecorder;
+        
+        // --- State ---
+        let pttKey = "Space";
+        let isRecordingKey = false;
         let activeChannel = null;
         let isTalking = false;
+        
+        // Web Audio API
+        let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        let processor, localStream;
 
-        // UI & Registry
+        // --- Keybind System ---
+        const keyBtn = document.getElementById('keybindBtn');
+        keyBtn.onclick = () => {
+            isRecordingKey = true;
+            keyBtn.innerText = "PRESS ANY KEY...";
+            keyBtn.classList.add('recording');
+        };
+
+        window.addEventListener('keydown', (e) => {
+            if (isRecordingKey) {
+                e.preventDefault();
+                pttKey = e.code;
+                keyBtn.innerText = pttKey.replace('Key', '').toUpperCase();
+                keyBtn.classList.remove('recording');
+                isRecordingKey = false;
+                updateUI(); // Refresh button text
+                return;
+            }
+
+            if (e.code === pttKey && !e.repeat && !isRecordingKey) {
+                if (activeChannel) {
+                    e.preventDefault();
+                    startTX();
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === pttKey) stopTX();
+        });
+
+        // --- Connection & UI ---
         document.querySelectorAll('.connect-btn').forEach(btn => {
             btn.onclick = () => {
                 const chan = btn.dataset.channel;
                 activeChannel = (activeChannel === chan) ? null : chan;
+                
+                // AudioContext must be resumed by user gesture
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                
                 updateUI();
-                socket.emit('update-status', { callsign: document.getElementById('callsign').value.toUpperCase(), activeChannel });
+                syncStatus();
             };
         });
 
@@ -90,96 +165,118 @@
             document.querySelectorAll('.connect-btn').forEach(btn => {
                 const chan = btn.dataset.channel;
                 const ptt = document.getElementById(`ptt-${chan}`);
-                const isActive = activeChannel === chan;
-                btn.innerText = isActive ? "ACTIVE" : "CONNECT";
-                btn.classList.toggle('connected-active', isActive);
-                ptt.disabled = !isActive;
-                ptt.classList.toggle('can-talk', isActive);
+                const isSelected = activeChannel === chan;
+
+                btn.innerText = isSelected ? "CONNECTED" : "CONNECT";
+                btn.classList.toggle('connected-active', isSelected);
+                
+                ptt.disabled = !isSelected;
+                ptt.classList.toggle('can-talk', isSelected);
+                ptt.innerText = isSelected ? `HOLD ${pttKey.replace('Key', '').toUpperCase()}` : "OFF AIR";
             });
         }
 
-        socket.on('unit-list-update', (reg) => {
-            ['fire-rto', 'ops-1', 'ops-2'].forEach(chan => {
+        function syncStatus() {
+            socket.emit('update-status', {
+                callsign: document.getElementById('callsign').value || "UNIT",
+                activeChannel: activeChannel
+            });
+        }
+
+        socket.on('unit-list-update', (registry) => {
+            const channels = ['fire-rto', 'ops-1', 'ops-2'];
+            channels.forEach(chan => {
                 const list = document.getElementById(`units-${chan}`);
-                list.innerHTML = Object.values(reg).filter(u => u.activeChannel === chan)
-                    .map(u => `<div class="unit-entry">${u.callsign}</div>`).join('');
+                list.innerHTML = Object.values(registry)
+                    .filter(u => u.activeChannel === chan)
+                    .map(u => `<div class="unit-entry">${u.callsign}</div>`)
+                    .join('');
             });
         });
 
-        // TRANSMIT
-        async function startTx() {
+        // --- Audio Engine (Raw PCM) ---
+        async function startTX() {
             if (!activeChannel || isTalking) return;
             isTalking = true;
             document.getElementById(`ptt-${activeChannel}`).classList.add('transmitting');
-            
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true, noiseSuppression: true } 
-            });
-            
-            // WEBM format is crucial for headers
-            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-            mediaRecorder.ondataavailable = async (e) => {
-                if (e.data.size > 0) {
-                    const reader = new FileReader();
-                    reader.readAsDataURL(e.data);
-                    reader.onloadend = () => {
-                        socket.emit('audio-data', {
-                            channel: activeChannel,
-                            callsign: document.getElementById('callsign').value.toUpperCase(),
-                            audio: reader.result
-                        });
-                    };
-                }
-            };
-            mediaRecorder.start(250);
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { 
+                        deviceId: document.getElementById('micInput').value,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    } 
+                });
+
+                const source = audioCtx.createMediaStreamSource(localStream);
+                // 2048 buffer size for a balance between lag and stability
+                processor = audioCtx.createScriptProcessor(2048, 1, 1);
+
+                source.connect(processor);
+                processor.connect(audioCtx.destination);
+
+                processor.onaudioprocess = (e) => {
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    socket.emit('audio-raw', {
+                        channel: activeChannel,
+                        callsign: document.getElementById('callsign').value.toUpperCase(),
+                        buffer: inputData // Sending raw Float32 array
+                    });
+                };
+            } catch (err) {
+                console.error("Mic Error:", err);
+                stopTX();
+            }
         }
 
-        function stopTx() {
+        function stopTX() {
             if (!isTalking) return;
             isTalking = false;
+            if (processor) processor.disconnect();
+            if (localStream) localStream.getTracks().forEach(t => t.stop());
             if (activeChannel) document.getElementById(`ptt-${activeChannel}`).classList.remove('transmitting');
-            if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
         }
 
-        window.addEventListener('keydown', (e) => { if (e.key === pttKey && !e.repeat) startTx(); });
-        window.addEventListener('keyup', (e) => { if (e.key === pttKey) stopTx(); });
-
-        // RECEIVE (Queue Management)
-        let audioQueue = [];
-        let isPlaying = false;
-
-        socket.on('audio-stream', (packet) => {
-            const monitor = document.querySelector(`.monitor-toggle[data-channel="${packet.channel}"]`);
+        // --- Receiver Logic ---
+        socket.on('audio-in', (packet) => {
             const isSelf = packet.callsign === document.getElementById('callsign').value.toUpperCase();
+            if (isSelf) return;
+
+            const monitor = document.querySelector(`.monitor-toggle[data-channel="${packet.channel}"]`);
             
-            if (!isSelf && (activeChannel === packet.channel || (monitor && monitor.checked))) {
-                audioQueue.push(packet.audio);
-                if (!isPlaying) playNext();
+            // Play if we are monitoring OR if we are connected to the channel
+            if ((monitor && monitor.checked) || activeChannel === packet.channel) {
+                const buffer = audioCtx.createBuffer(1, 2048, audioCtx.sampleRate);
+                buffer.getChannelData(0).set(packet.buffer);
+                
+                const source = audioCtx.createBufferSource();
+                source.buffer = buffer;
+
+                // Handle Custom Speaker Output
+                const outputId = document.getElementById('audioOutput').value;
+                if (outputId && audioCtx.setSinkId) {
+                    audioCtx.setSinkId(outputId);
+                }
+
+                source.connect(audioCtx.destination);
+                source.start();
             }
         });
 
-        function playNext() {
-            if (audioQueue.length === 0) { isPlaying = false; return; }
-            isPlaying = true;
-            let audio = new Audio(audioQueue.shift());
-            if (document.getElementById('audioOutput').value !== 'default') {
-                audio.setSinkId(document.getElementById('audioOutput').value);
-            }
-            audio.onended = playNext;
-            audio.play().catch(() => playNext());
-        }
-
-        async function initDevices() {
+        // Initialize Devices
+        async function init() {
             const devs = await navigator.mediaDevices.enumerateDevices();
             const micSel = document.getElementById('micInput');
             const spkSel = document.getElementById('audioOutput');
+            
             devs.forEach(d => {
                 const opt = `<option value="${d.deviceId}">${d.label || d.kind}</option>`;
                 if (d.kind === 'audioinput') micSel.innerHTML += opt;
                 if (d.kind === 'audiooutput') spkSel.innerHTML += opt;
             });
         }
-        initDevices();
+        init();
     </script>
 </body>
 </html>

@@ -10,14 +10,22 @@ app.use(express.static('public'));
 const unitRegistry = {};
 
 io.on('connection', (socket) => {
+    // Initialize unit
     unitRegistry[socket.id] = { callsign: 'Unknown', activeChannel: null };
+
     socket.on('update-status', (status) => {
-        unitRegistry[socket.id] = { callsign: status.callsign, activeChannel: status.activeChannel };
+        unitRegistry[socket.id] = {
+            callsign: status.callsign.toUpperCase(),
+            activeChannel: status.activeChannel
+        };
         io.emit('unit-list-update', unitRegistry);
     });
-    socket.on('audio-data', (packet) => {
-        socket.broadcast.emit('audio-stream', packet);
+
+    // Relay raw PCM audio data
+    socket.on('audio-raw', (packet) => {
+        socket.broadcast.volatile.emit('audio-in', packet);
     });
+
     socket.on('disconnect', () => {
         delete unitRegistry[socket.id];
         io.emit('unit-list-update', unitRegistry);
@@ -25,4 +33,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 10000;
-http.listen(PORT, () => console.log(`Radio Relay Active`));
+http.listen(PORT, () => console.log(`Radio Relay Active on Port ${PORT}`));
