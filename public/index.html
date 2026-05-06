@@ -2,12 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio | Ultra-Stable V6.1</title>
-    <!-- This stops the annoying favicon.ico 404 error -->
+    <title>Fire Radio | Pro Grade V7</title>
     <link rel="icon" href="data:,">
     <style>
         :root { --bg: #0d1117; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
-        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; padding: 20px; }
         .dashboard { max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
         .card { background: var(--panel); border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
         .ptt-btn { width: 100%; padding: 50px 0; font-size: 22px; font-weight: bold; border-radius: 12px; border: none; background: #21262d; color: #484f58; transition: 0.2s; cursor: not-allowed; }
@@ -28,10 +27,8 @@
             <h3 style="margin-top:0">Radio Config</h3>
             <label style="font-size:12px; color:#8b949e">CALLSIGN</label>
             <input type="text" id="callsign" value="UNIT-1">
-            
             <label style="font-size:12px; color:#8b949e">MIC INPUT</label>
             <select id="micInput"></select>
-            
             <label style="font-size:12px; color:#8b949e">PTT KEY</label>
             <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer;">SPACEBAR</button>
         </div>
@@ -57,7 +54,6 @@
         class RadioProcessor extends AudioWorkletProcessor {
             constructor() { 
                 super(); 
-                // Reduced from 2048 to 1024 to make the PTT button feel faster
                 this.buf = new Float32Array(1024); 
                 this.ptr = 0; 
             }
@@ -76,6 +72,21 @@
         }
         registerProcessor('radio-processor', RadioProcessor);
     `;
+
+    // --- BEEP GENERATOR ---
+    function playBeep(freq, duration, volume) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    }
 
     // --- SETUP & KEYBINDS ---
     document.getElementById('keybindBtn').onclick = () => { isBinding = true; document.getElementById('keybindBtn').innerText = "PUSH KEY..."; };
@@ -115,28 +126,46 @@
     async function startTX() {
         if (isTalking) return;
         isTalking = true;
+        playBeep(880, 0.1, 0.05); // Start Beep (Higher pitch)
         document.getElementById('pttBtn').classList.add('active');
 
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true } });
+        micStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { 
+                deviceId: document.getElementById('micInput').value, 
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            } 
+        });
+        
         const source = audioCtx.createMediaStreamSource(micStream);
-        workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
+        
+        // FILTERING: Remove low rumble/background noise
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = "highpass";
+        filter.frequency.value = 200; // Cuts everything below 200Hz
 
+        workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
         workletNode.port.onmessage = (e) => {
             const int16 = new Int16Array(e.data.length);
             for (let i = 0; i < e.data.length; i++) int16[i] = e.data[i] * 0x7FFF;
             socket.emit('audio-packet', { call: document.getElementById('callsign').value, data: int16.buffer });
         };
-        source.connect(workletNode);
+
+        source.connect(filter);
+        filter.connect(workletNode);
     }
 
     function stopTX() {
+        if(!isTalking) return;
         isTalking = false;
+        playBeep(440, 0.1, 0.05); // End Beep (Lower pitch)
         if (workletNode) workletNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
         document.getElementById('pttBtn').classList.remove('active');
     }
 
-    // --- RECEPTION (With Anti-Drift Sync) ---
+    // --- RECEPTION ---
     socket.on('audio-out', (packet) => {
         if (packet.call === document.getElementById('callsign').value || !active) return;
 
@@ -149,18 +178,22 @@
 
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
-        source.connect(audioCtx.destination);
+        
+        // COMPRESSOR: Evens out voice volume
+        const compressor = audioCtx.createDynamicsCompressor();
+        compressor.threshold.setValueAtTime(-24, audioCtx.currentTime);
+        compressor.knee.setValueAtTime(40, audioCtx.currentTime);
+        compressor.ratio.setValueAtTime(12, audioCtx.currentTime);
+        compressor.attack.setValueAtTime(0, audioCtx.currentTime);
+        compressor.release.setValueAtTime(0.25, audioCtx.currentTime);
+
+        source.connect(compressor);
+        compressor.connect(audioCtx.destination);
         
         const now = audioCtx.currentTime;
-        
-        // 1. If the queue is empty or behind, start a fresh timeline with a tiny 80ms delay
         if (nextStartTime < now) {
             nextStartTime = now + 0.08; 
-        } 
-        // 2. THE RUBBER BAND: If the queue builds up more than 300ms of lag, SNAP it back.
-        // This drops delayed audio instead of letting it build up into a massive delay.
-        else if (nextStartTime > now + 0.3) {
-            console.warn("Audio drifted too far, snapping back to live!");
+        } else if (nextStartTime > now + 0.3) {
             nextStartTime = now + 0.08;
         }
         
