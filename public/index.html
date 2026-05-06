@@ -2,43 +2,45 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio | Clear Voice V5</title>
+    <title>Fire Radio | Ultra-Stable V6</title>
     <style>
-        :root { --bg: #0b0e14; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
-        body { background: var(--bg); color: var(--text); font-family: sans-serif; padding: 20px; margin:0; }
-        .grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
-        .card { background: var(--panel); border: 1px solid #30363d; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
-        .ptt-btn { width: 100%; padding: 40px 0; font-size: 20px; font-weight: bold; border-radius: 8px; border: 2px solid #30363d; background: #21262d; color: #484f58; transition: 0.2s; cursor: not-allowed; text-transform: uppercase; }
-        .ptt-btn.ready { background: #238636; color: white; cursor: pointer; border-color: #2ea043; }
-        .ptt-btn.active { background: var(--red); border-color: #da3633; box-shadow: 0 0 20px rgba(248, 81, 73, 0.4); }
-        .unit-list { background: #0d1117; height: 250px; overflow-y: auto; padding: 10px; border-radius: 4px; font-size: 13px; border: 1px solid #30363d; margin: 10px 0; }
-        .unit { padding: 6px 10px; border-left: 3px solid var(--green); margin-bottom: 5px; background: #1c2128; }
-        .btn-conn { width: 100%; padding: 12px; font-weight: bold; cursor: pointer; background: #30363d; color: white; border: none; border-radius: 6px; margin-bottom: 10px; }
-        .btn-conn.active { background: var(--accent); }
-        select, input { width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; }
-        label { font-size: 11px; color: #8b949e; text-transform: uppercase; display: block; margin-bottom: 5px; font-weight: 600; }
+        :root { --bg: #0d1117; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; }
+        .dashboard { max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+        .card { background: var(--panel); border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+        .ptt-btn { width: 100%; padding: 50px 0; font-size: 22px; font-weight: bold; border-radius: 12px; border: none; background: #21262d; color: #484f58; transition: 0.2s; cursor: not-allowed; }
+        .ptt-btn.ready { background: #238636; color: white; cursor: pointer; }
+        .ptt-btn.active { background: var(--red); box-shadow: 0 0 30px rgba(248, 81, 73, 0.5); transform: scale(0.98); }
+        .unit-list { background: #0d1117; height: 180px; overflow-y: auto; padding: 10px; border-radius: 6px; font-size: 14px; border: 1px solid #30363d; margin: 15px 0; }
+        .unit-tag { padding: 8px; border-left: 4px solid var(--green); background: #21262d; margin-bottom: 6px; border-radius: 0 4px 4px 0; }
+        .conn-btn { width: 100%; padding: 12px; font-weight: bold; border-radius: 6px; border: none; background: #30363d; color: white; cursor: pointer; margin-bottom: 15px; }
+        .conn-btn.active { background: var(--accent); }
+        select, input { width: 100%; padding: 12px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; margin-bottom: 10px; }
     </style>
 </head>
 <body>
 
-<div class="grid">
+<div class="dashboard">
     <div class="sidebar">
         <div class="card">
-            <h2 style="margin-top:0">Radio Settings</h2>
-            <div style="margin-bottom:15px"><label>Callsign</label><input type="text" id="callsign" value="UNIT-1" oninput="updateStatus()"></div>
-            <div style="margin-bottom:15px"><label>PTT Key</label><button id="keybindBtn" style="width:100%; padding:10px; cursor:pointer; background:#21262d; color:white; border:1px solid #30363d;">SPACEBAR</button></div>
-            <div style="margin-bottom:15px"><label>Mic</label><select id="micInput"></select></div>
+            <h3 style="margin-top:0">Radio Config</h3>
+            <label style="font-size:12px; color:#8b949e">CALLSIGN</label>
+            <input type="text" id="callsign" value="UNIT-1">
+            
+            <label style="font-size:12px; color:#8b949e">MIC INPUT</label>
+            <select id="micInput"></select>
+            
+            <label style="font-size:12px; color:#8b949e">PTT KEY</label>
+            <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer;">SPACEBAR</button>
         </div>
     </div>
 
     <div class="main">
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
-            <div class="card">
-                <h3>Main Dispatch</h3>
-                <button class="btn-conn" data-chan="fire-rto">CONNECT</button>
-                <div class="unit-list" id="list-fire-rto"></div>
-                <button class="ptt-btn" id="ptt-fire-rto" disabled>OFF AIR</button>
-            </div>
+        <div class="card">
+            <h2 style="margin:0 0 15px 0">Main Channel</h2>
+            <button class="conn-btn" id="connBtn">CONNECT TO DISPATCH</button>
+            <div class="unit-list" id="unitList"></div>
+            <button class="ptt-btn" id="pttBtn" disabled>OFF AIR</button>
         </div>
     </div>
 </div>
@@ -46,30 +48,25 @@
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
     const socket = io("https://fire-radio.onrender.com");
-    let pttKey = "Space";
-    let isBinding = false, activeChannel = null, isTalking = false;
-    let audioCtx, micStream, workletNode;
-    
-    // Scheduling variables
-    let nextStartTime = 0;
-    const JITTER_DELAY = 0.1; // 100ms safety buffer
+    let pttKey = "Space", isBinding = false, isTalking = false, active = false;
+    let audioCtx, micStream, workletNode, nextStartTime = 0;
+    const JITTER_BUFFER = 0.2; // 200ms delay for smoothness
 
     const workletCode = `
         class RadioProcessor extends AudioWorkletProcessor {
-            constructor() {
-                super();
-                this.buffer = new Float32Array(4096);
-                this.offset = 0;
+            constructor() { 
+                super(); 
+                this.buf = new Float32Array(2048); 
+                this.ptr = 0; 
             }
-            process(inputs, outputs, parameters) {
-                const input = inputs[0][0];
+            process(ins) {
+                const input = ins[0][0];
                 if (!input) return true;
-                
                 for (let i = 0; i < input.length; i++) {
-                    this.buffer[this.offset++] = input[i];
-                    if (this.offset >= this.buffer.length) {
-                        this.port.postMessage(this.buffer);
-                        this.offset = 0;
+                    this.buf[this.ptr++] = input[i];
+                    if (this.ptr >= this.buf.length) {
+                        this.port.postMessage(this.buf);
+                        this.ptr = 0;
                     }
                 }
                 return true;
@@ -78,69 +75,54 @@
         registerProcessor('radio-processor', RadioProcessor);
     `;
 
-    const keyBtn = document.getElementById('keybindBtn');
-    keyBtn.onclick = () => { isBinding = true; keyBtn.innerText = "Press key..."; };
+    // --- SETUP & KEYBINDS ---
+    document.getElementById('keybindBtn').onclick = () => { isBinding = true; document.getElementById('keybindBtn').innerText = "PUSH KEY..."; };
 
     window.onkeydown = (e) => {
         if (isBinding) {
             e.preventDefault(); pttKey = e.code;
-            keyBtn.innerText = pttKey.replace('Key', '').toUpperCase();
+            document.getElementById('keybindBtn').innerText = pttKey.toUpperCase();
             isBinding = false; updateUI(); return;
         }
-        if (e.code === pttKey && !e.repeat) startTX();
+        if (e.code === pttKey && !e.repeat && active) startTX();
     };
     window.onkeyup = (e) => { if (e.code === pttKey) stopTX(); };
 
-    document.querySelectorAll('.btn-conn').forEach(btn => {
-        btn.onclick = async () => {
-            const chan = btn.dataset.chan;
-            activeChannel = (activeChannel === chan) ? null : chan;
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
-                const blob = new Blob([workletCode], { type: 'application/javascript' });
-                await audioCtx.audioWorklet.addModule(URL.createObjectURL(blob));
-            }
-            if (audioCtx.state === 'suspended') await audioCtx.resume();
-            updateUI(); updateStatus();
-        };
-    });
+    document.getElementById('connBtn').onclick = async () => {
+        active = !active;
+        if (!audioCtx) {
+            audioCtx = new AudioContext({ sampleRate: 44100 });
+            await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type:'application/javascript'})));
+        }
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        updateUI();
+        socket.emit('update-status', { callsign: document.getElementById('callsign').value, activeChannel: active ? 'dispatch' : null });
+    };
 
     function updateUI() {
-        document.querySelectorAll('.btn-conn').forEach(btn => {
-            const chan = btn.dataset.chan;
-            const ptt = document.getElementById(`ptt-${chan}`);
-            const isActive = (activeChannel === chan);
-            btn.classList.toggle('active', isActive);
-            if (ptt) {
-                ptt.disabled = !isActive;
-                ptt.classList.toggle('ready', isActive);
-                ptt.innerText = isActive ? `HOLD ${pttKey.replace('Key', '').toUpperCase()}` : "OFF AIR";
-            }
-        });
+        const btn = document.getElementById('connBtn');
+        const ptt = document.getElementById('pttBtn');
+        btn.innerText = active ? "CONNECTED" : "CONNECT TO DISPATCH";
+        btn.classList.toggle('active', active);
+        ptt.disabled = !active;
+        ptt.classList.toggle('ready', active);
+        ptt.innerText = active ? `HOLD ${pttKey.replace('Key','')}` : "OFF AIR";
     }
 
-    function updateStatus() {
-        socket.emit('update-status', { callsign: document.getElementById('callsign').value, activeChannel });
-    }
-
-    socket.on('unit-list-update', (reg) => {
-        document.getElementById('list-fire-rto').innerHTML = Object.values(reg)
-            .filter(u => u.activeChannel === 'fire-rto').map(u => `<div class="unit">${u.callsign}</div>`).join('');
-    });
-
+    // --- TRANSMISSION ---
     async function startTX() {
-        if (!activeChannel || isTalking) return;
+        if (isTalking) return;
         isTalking = true;
-        document.getElementById(`ptt-${activeChannel}`).classList.add('active');
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true, noiseSuppression: true } });
+        document.getElementById('pttBtn').classList.add('active');
+
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true } });
         const source = audioCtx.createMediaStreamSource(micStream);
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
+
         workletNode.port.onmessage = (e) => {
             const int16 = new Int16Array(e.data.length);
-            for (let i = 0; i < e.data.length; i++) {
-                int16[i] = Math.max(-1, Math.min(1, e.data[i])) * 0x7FFF;
-            }
-            socket.emit('audio-packet', { chan: activeChannel, call: document.getElementById('callsign').value.toUpperCase(), data: int16.buffer });
+            for (let i = 0; i < e.data.length; i++) int16[i] = e.data[i] * 0x7FFF;
+            socket.emit('audio-packet', { call: document.getElementById('callsign').value, data: int16.buffer });
         };
         source.connect(workletNode);
     }
@@ -149,11 +131,12 @@
         isTalking = false;
         if (workletNode) workletNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
-        if (activeChannel) document.getElementById(`ptt-${activeChannel}`).classList.remove('active');
+        document.getElementById('pttBtn').classList.remove('active');
     }
 
+    // --- RECEPTION ---
     socket.on('audio-out', (packet) => {
-        if (packet.call === document.getElementById('callsign').value.toUpperCase() || packet.chan !== activeChannel) return;
+        if (packet.call === document.getElementById('callsign').value || !active) return;
 
         const int16 = new Int16Array(packet.data);
         const float32 = new Float32Array(int16.length);
@@ -164,22 +147,24 @@
 
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
-        source.connect(audioCtx.destination);
-
-        // --- THE FIX: SCHEDULING ---
+        
+        // Anti-Crackling Scheduling
         const now = audioCtx.currentTime;
-        if (nextStartTime < now) {
-            nextStartTime = now + JITTER_DELAY;
-        }
+        if (nextStartTime < now) nextStartTime = now + JITTER_BUFFER;
+        
+        source.connect(audioCtx.destination);
         source.start(nextStartTime);
         nextStartTime += buffer.duration;
     });
 
+    socket.on('unit-list-update', (reg) => {
+        document.getElementById('unitList').innerHTML = Object.values(reg).filter(u => u.activeChannel === 'dispatch')
+            .map(u => `<div class="unit-tag">${u.callsign}</div>`).join('');
+    });
+
     navigator.mediaDevices.enumerateDevices().then(devs => {
         const sel = document.getElementById('micInput');
-        devs.filter(d => d.kind === 'audioinput').forEach(d => {
-            sel.innerHTML += `<option value="${d.deviceId}">${d.label || 'Microphone'}</option>`;
-        });
+        devs.filter(d => d.kind === 'audioinput').forEach(d => sel.innerHTML += `<option value="${d.deviceId}">${d.label || 'Mic'}</option>`);
     });
 </script>
 </body>
