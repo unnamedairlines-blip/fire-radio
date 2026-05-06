@@ -2,25 +2,49 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio | Pro Stable</title>
+    <title>Fire Radio | Full Restoration V11</title>
+    <link rel="icon" href="data:,">
     <style>
         :root { --bg: #0d1117; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
-        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; padding: 20px; text-align: center; }
-        .card { background: var(--panel); border: 1px solid #30363d; border-radius: 8px; padding: 30px; max-width: 400px; margin: 0 auto; }
-        .ptt-btn { width: 100%; padding: 40px 0; font-size: 20px; font-weight: bold; border-radius: 12px; border: none; background: #21262d; color: #484f58; cursor: pointer; transition: 0.2s; }
-        .ptt-btn.active { background: var(--red); color: white; box-shadow: 0 0 20px rgba(248, 81, 73, 0.4); }
-        .status { margin-top: 15px; font-size: 14px; color: #8b949e; }
-        input, select { width: 100%; padding: 10px; margin: 10px 0; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 5px; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; padding: 20px; }
+        .dashboard { max-width: 800px; margin: 0 auto; display: grid; grid-template-columns: 250px 1fr; gap: 20px; }
+        .card { background: var(--panel); border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+        .ptt-btn { width: 100%; padding: 50px 0; font-size: 22px; font-weight: bold; border-radius: 12px; border: none; background: #21262d; color: #484f58; cursor: pointer; transition: 0.2s; }
+        .ptt-btn.active { background: var(--red); color: white; box-shadow: 0 0 30px rgba(248, 81, 73, 0.4); }
+        .unit-list { background: #0d1117; height: 250px; overflow-y: auto; padding: 10px; border-radius: 6px; font-size: 14px; border: 1px solid #30363d; margin-top: 10px; }
+        .unit-tag { padding: 8px; border-left: 4px solid var(--accent); background: #21262d; margin-bottom: 6px; border-radius: 0 4px 4px 0; font-family: monospace; }
+        select, input { width: 100%; padding: 10px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; margin-bottom: 10px; }
+        .status-bar { font-size: 12px; color: #8b949e; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #30363d; }
+        .dot.active { background: var(--green); box-shadow: 0 0 8px var(--green); }
     </style>
 </head>
 <body>
 
-<div class="card">
-    <h2 style="margin-top:0">Radio Unit</h2>
-    <input type="text" id="callsign" placeholder="Callsign (e.g. Engine 1)">
-    <select id="micInput"></select>
-    <button class="ptt-btn" id="pttBtn">HOLD TO TALK</button>
-    <div class="status" id="status">Ready</div>
+<div class="dashboard">
+    <div class="sidebar">
+        <div class="card">
+            <h3 style="margin-top:0">Settings</h3>
+            <label style="font-size:11px; color:#8b949e">CALLSIGN</label>
+            <input type="text" id="callsign" value="UNIT-1">
+            <label style="font-size:11px; color:#8b949e">MIC SOURCE</label>
+            <select id="micInput"></select>
+            <hr style="border:0; border-top:1px solid #30363d; margin: 15px 0;">
+            <label style="font-size:11px; color:#8b949e">UNITS ONLINE</label>
+            <div class="unit-list" id="unitList">Connecting...</div>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="card">
+            <div class="status-bar">
+                <div id="statusDot" class="dot"></div>
+                <span id="statusText">System Ready | Noise Filter Active</span>
+            </div>
+            <button class="ptt-btn" id="pttBtn">HOLD TO TALK</button>
+            <p style="font-size: 12px; color: #8b949e; margin-top: 15px;">Note: Use headphones to prevent echo and "choppy" audio.</p>
+        </div>
+    </div>
 </div>
 
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -29,74 +53,92 @@
     let audioCtx, micStream, workletNode, isTalking = false;
     let nextStartTime = 0;
 
-    // --- SOUND EFFECTS ---
-    function beep(freq, len) {
-        if (!audioCtx) return;
-        const osc = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        osc.frequency.value = freq;
-        g.gain.setValueAtTime(0.02, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + len);
-        osc.connect(g); g.connect(audioCtx.destination);
-        osc.start(); osc.stop(audioCtx.currentTime + len);
-    }
+    const workletCode = `
+        class P extends AudioWorkletProcessor {
+            process(ins) {
+                const input = ins[0][0];
+                if (!input) return true;
+                // Noise Gate: Mutes mic if sound is below 1.5% volume
+                let active = false;
+                for(let i=0; i<input.length; i++) { if(Math.abs(input[i]) > 0.015) { active = true; break; } }
+                this.port.postMessage(active ? input : new Float32Array(input.length));
+                return true;
+            }
+        }
+        registerProcessor('p', P);
+    `;
 
-    // --- START AUDIO SYSTEM ---
     async function initAudio() {
         if (!audioCtx) {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const code = `class P extends AudioWorkletProcessor {
-                process(ins) {
-                    if (ins[0][0]) this.port.postMessage(ins[0][0]);
-                    return true;
-                }
-            } registerProcessor('p', P);`;
-            await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], {type:'application/javascript'})));
+            audioCtx = new AudioContext();
+            await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type:'application/javascript'})));
         }
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
     }
 
-    // --- PUSH TO TALK ---
+    // --- UNIT LIST SYNC ---
+    function updateServerStatus() {
+        socket.emit('update-status', { 
+            callsign: document.getElementById('callsign').value, 
+            activeChannel: 'dispatch' 
+        });
+    }
+
+    socket.on('connect', () => {
+        document.getElementById('statusDot').classList.add('active');
+        updateServerStatus();
+    });
+
+    socket.on('unit-list-update', (units) => {
+        const list = document.getElementById('unitList');
+        list.innerHTML = Object.values(units)
+            .map(u => `<div class="unit-tag">${u.callsign}</div>`)
+            .join('') || "No other units online";
+    });
+
+    // --- TRANSMISSION ---
     const pttBtn = document.getElementById('pttBtn');
-    
+
     pttBtn.onmousedown = async () => {
         await initAudio();
-        if (audioCtx.state === 'suspended') await audioCtx.resume();
         isTalking = true;
         pttBtn.classList.add('active');
-        beep(1000, 0.1); // Start beep
+        document.getElementById('statusText').innerText = "TX ACTIVE";
 
         micStream = await navigator.mediaDevices.getUserMedia({ 
             audio: { deviceId: document.getElementById('micInput').value, echoCancellation: true, noiseSuppression: true } 
         });
         
         const source = audioCtx.createMediaStreamSource(micStream);
+        const hpFilter = audioCtx.createBiquadFilter();
+        hpFilter.type = "highpass";
+        hpFilter.frequency.value = 250; 
+
         workletNode = new AudioWorkletNode(audioCtx, 'p');
-        
         workletNode.port.onmessage = (e) => {
             const int16 = new Int16Array(e.data.length);
             for (let i = 0; i < e.data.length; i++) {
-                // Compression & normalization to clear up the "crackly" peaks
-                let s = Math.max(-1, Math.min(1, e.data[i] * 1.5)); 
-                int16[i] = s * 0x7FFF;
+                int16[i] = Math.max(-1, Math.min(1, e.data[i] * 1.5)) * 0x7FFF;
             }
             socket.emit('audio-packet', { call: document.getElementById('callsign').value, data: int16.buffer });
         };
-        source.connect(workletNode);
+
+        source.connect(hpFilter);
+        hpFilter.connect(workletNode);
     };
 
     window.onmouseup = () => {
         if (!isTalking) return;
         isTalking = false;
         pttBtn.classList.remove('active');
-        beep(500, 0.1); // End beep
+        document.getElementById('statusText').innerText = "System Ready | Noise Filter Active";
         if (workletNode) workletNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
     };
 
-    // --- RECEIVING (The Fix) ---
+    // --- RECEPTION ---
     socket.on('audio-out', (packet) => {
-        if (packet.call === document.getElementById('callsign').value) return;
-        if (!audioCtx) return;
+        if (packet.call === document.getElementById('callsign').value || !audioCtx) return;
 
         const int16 = new Int16Array(packet.data);
         const float32 = new Float32Array(int16.length);
@@ -107,16 +149,12 @@
 
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
-
-        // Jitter Buffer Logic:
-        const now = audioCtx.currentTime;
-        const latency = 0.15; // 150ms buffer to stop crackling
-
-        if (nextStartTime < now) {
-            nextStartTime = now + latency;
-        }
-
         source.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+        if (nextStartTime < now) nextStartTime = now + 0.12; 
+        else if (nextStartTime > now + 0.4) nextStartTime = now + 0.12;
+
         source.start(nextStartTime);
         nextStartTime += buffer.duration;
     });
@@ -128,6 +166,9 @@
             sel.innerHTML += `<option value="${d.deviceId}">${d.label || 'Microphone'}</option>`;
         });
     });
+
+    // Re-sync callsign if changed
+    document.getElementById('callsign').onchange = updateServerStatus;
 </script>
 </body>
 </html>
