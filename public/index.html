@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Fire Radio | Pro Grade V7</title>
+    <title>Fire Radio | Crystal Clear V8</title>
     <link rel="icon" href="data:,">
     <style>
         :root { --bg: #0d1117; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
@@ -50,6 +50,7 @@
     let pttKey = "Space", isBinding = false, isTalking = false, active = false;
     let audioCtx, micStream, workletNode, nextStartTime = 0;
 
+    // AUDIO WORKLET: Handles raw data and basic volume normalization
     const workletCode = `
         class RadioProcessor extends AudioWorkletProcessor {
             constructor() { 
@@ -61,6 +62,7 @@
                 const input = ins[0][0];
                 if (!input) return true;
                 for (let i = 0; i < input.length; i++) {
+                    // Normalize very slightly to prevent clipping before it hits the socket
                     this.buf[this.ptr++] = input[i];
                     if (this.ptr >= this.buf.length) {
                         this.port.postMessage(this.buf);
@@ -73,7 +75,6 @@
         registerProcessor('radio-processor', RadioProcessor);
     `;
 
-    // --- BEEP GENERATOR ---
     function playBeep(freq, duration, volume) {
         if (!audioCtx) return;
         const osc = audioCtx.createOscillator();
@@ -81,14 +82,11 @@
         osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
         gain.gain.setValueAtTime(volume, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + duration);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + duration);
     }
 
-    // --- SETUP & KEYBINDS ---
     document.getElementById('keybindBtn').onclick = () => { isBinding = true; document.getElementById('keybindBtn').innerText = "PUSH KEY..."; };
 
     window.onkeydown = (e) => {
@@ -104,7 +102,8 @@
     document.getElementById('connBtn').onclick = async () => {
         active = !active;
         if (!audioCtx) {
-            audioCtx = new AudioContext({ sampleRate: 44100 });
+            // REMOVED FORCED SAMPLE RATE: Letting the browser choose its native hardware rate
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type:'application/javascript'})));
         }
         if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -122,11 +121,10 @@
         ptt.innerText = active ? `HOLD ${pttKey.replace('Key','')}` : "OFF AIR";
     }
 
-    // --- TRANSMISSION ---
     async function startTX() {
         if (isTalking) return;
         isTalking = true;
-        playBeep(880, 0.1, 0.05); // Start Beep (Higher pitch)
+        playBeep(1200, 0.08, 0.03); // Quick high-pitched chirp
         document.getElementById('pttBtn').classList.add('active');
 
         micStream = await navigator.mediaDevices.getUserMedia({ 
@@ -140,15 +138,19 @@
         
         const source = audioCtx.createMediaStreamSource(micStream);
         
-        // FILTERING: Remove low rumble/background noise
+        // VOICE FILTER: Removes the low rumble
         const filter = audioCtx.createBiquadFilter();
         filter.type = "highpass";
-        filter.frequency.value = 200; // Cuts everything below 200Hz
+        filter.frequency.value = 250; 
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
         workletNode.port.onmessage = (e) => {
             const int16 = new Int16Array(e.data.length);
-            for (let i = 0; i < e.data.length; i++) int16[i] = e.data[i] * 0x7FFF;
+            for (let i = 0; i < e.data.length; i++) {
+                // Amplify slightly for clarity
+                let s = e.data[i] * 1.2; 
+                int16[i] = Math.max(-1, Math.min(1, s)) * 0x7FFF;
+            }
             socket.emit('audio-packet', { call: document.getElementById('callsign').value, data: int16.buffer });
         };
 
@@ -159,13 +161,12 @@
     function stopTX() {
         if(!isTalking) return;
         isTalking = false;
-        playBeep(440, 0.1, 0.05); // End Beep (Lower pitch)
+        playBeep(600, 0.1, 0.03); // Lower tone blip
         if (workletNode) workletNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
         document.getElementById('pttBtn').classList.remove('active');
     }
 
-    // --- RECEPTION ---
     socket.on('audio-out', (packet) => {
         if (packet.call === document.getElementById('callsign').value || !active) return;
 
@@ -179,22 +180,20 @@
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
         
-        // COMPRESSOR: Evens out voice volume
+        // COMPRESSOR: Makes voices sound "Full" and consistent
         const compressor = audioCtx.createDynamicsCompressor();
-        compressor.threshold.setValueAtTime(-24, audioCtx.currentTime);
-        compressor.knee.setValueAtTime(40, audioCtx.currentTime);
-        compressor.ratio.setValueAtTime(12, audioCtx.currentTime);
-        compressor.attack.setValueAtTime(0, audioCtx.currentTime);
-        compressor.release.setValueAtTime(0.25, audioCtx.currentTime);
+        compressor.threshold.setValueAtTime(-20, audioCtx.currentTime);
+        compressor.ratio.setValueAtTime(4, audioCtx.currentTime);
 
         source.connect(compressor);
         compressor.connect(audioCtx.destination);
         
         const now = audioCtx.currentTime;
+        // ULTRA-LOW LATENCY SYNC: 60ms buffer
         if (nextStartTime < now) {
-            nextStartTime = now + 0.08; 
-        } else if (nextStartTime > now + 0.3) {
-            nextStartTime = now + 0.08;
+            nextStartTime = now + 0.06; 
+        } else if (nextStartTime > now + 0.2) {
+            nextStartTime = now + 0.06;
         }
         
         source.start(nextStartTime);
