@@ -32,6 +32,7 @@
             <label>PTT Keybind</label>
             <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer; border-radius:6px;">SPACEBAR</button>
             <p style="font-size: 11px; color: #8b949e; margin-top: 15px;">Status: <span id="socketStatus">Connecting...</span></p>
+            <p style="font-size: 11px; color: #8b949e; margin-top: 4px;">Audio: <span id="audioStatus">Idle</span></p>
         </div>
     </div>
 
@@ -50,11 +51,15 @@
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
     const socket = io("https://fire-radio.onrender.com");
-    const PACKET_SIZE = 2048;
+    const PACKET_SIZE = 1024;
+    const JITTER_TARGET = 0.12;
+    const JITTER_MIN = 0.03;
+    const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
     let pttKey = "Space", isBinding = false, isTalking = false, active = false;
     let audioCtx, micStream, sourceNode, filterNode, workletNode, monitorGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
+    let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -79,6 +84,10 @@
         osc.start(); osc.stop(audioCtx.currentTime + dur);
     }
 
+    function setAudioStatus(text) {
+        document.getElementById('audioStatus').innerText = text;
+    }
+
     function resetTxBuffer() {
         txOffset = 0;
     }
@@ -95,10 +104,15 @@
             sampleRate: audioCtx.sampleRate,
             seq: txSequence++
         });
+        txPackets++;
+        setAudioStatus(`TX ${txPackets} | RX ${rxPackets} | Peak ${lastMicPeak.toFixed(2)}`);
     }
 
     function queueMicSamples(samples) {
         let readOffset = 0;
+        for (let i = 0; i < samples.length; i++) {
+            lastMicPeak = Math.max(lastMicPeak * 0.96, Math.abs(samples[i]));
+        }
 
         while (readOffset < samples.length) {
             const copyLength = Math.min(PACKET_SIZE - txOffset, samples.length - readOffset);
@@ -131,6 +145,68 @@
         return output;
     }
 
+    async function ensureAudioContext() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+            await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type:'application/javascript'})));
+        }
+        await audioCtx.resume();
+    }
+
+    async function startMicPipeline() {
+        if (micStream && workletNode) return;
+        setAudioStatus("Opening mic...");
+
+        const selectedDevice = document.getElementById('micInput').value;
+        micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                deviceId: selectedDevice ? { exact: selectedDevice } : undefined,
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                sampleRate: audioCtx.sampleRate
+            }
+        });
+
+        sourceNode = audioCtx.createMediaStreamSource(micStream);
+
+        filterNode = audioCtx.createBiquadFilter();
+        filterNode.type = "lowpass";
+        filterNode.frequency.value = 6000;
+
+        workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
+        monitorGain = audioCtx.createGain();
+        monitorGain.gain.value = 0;
+
+        workletNode.port.onmessage = (e) => {
+            if (!isTalking || !active) return;
+            queueMicSamples(e.data);
+        };
+
+        sourceNode.connect(filterNode);
+        filterNode.connect(workletNode);
+        workletNode.connect(monitorGain);
+        monitorGain.connect(audioCtx.destination);
+        setAudioStatus("Mic ready");
+    }
+
+    function stopMicPipeline() {
+        if (workletNode) {
+            workletNode.port.onmessage = null;
+            workletNode.disconnect();
+        }
+        if (monitorGain) monitorGain.disconnect();
+        if (filterNode) filterNode.disconnect();
+        if (sourceNode) sourceNode.disconnect();
+        if (micStream) micStream.getTracks().forEach(t => t.stop());
+
+        sourceNode = null;
+        filterNode = null;
+        workletNode = null;
+        monitorGain = null;
+        micStream = null;
+    }
+
     document.getElementById('keybindBtn').onclick = () => { isBinding = true; document.getElementById('keybindBtn').innerText = "PUSH KEY..."; };
     window.onkeydown = (e) => {
         if (isBinding) {
@@ -161,16 +237,30 @@
     pttButton.addEventListener('pointerleave', stopTX);
 
     document.getElementById('connBtn').onclick = async () => {
-        if (!audioCtx) {
-            // Force 44100Hz to ensure all browsers match
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
-            await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type:'application/javascript'})));
+        try {
+            await ensureAudioContext();
+            active = !active;
+            nextStartTime = 0;
+
+            if (active) {
+                await startMicPipeline();
+            } else {
+                stopTX(false);
+                stopMicPipeline();
+                setAudioStatus(`Idle | TX ${txPackets} | RX ${rxPackets}`);
+            }
+
+            updateUI();
+            syncWithServer();
+        } catch (err) {
+            console.error('Unable to connect audio', err);
+            active = false;
+            stopTX(false);
+            stopMicPipeline();
+            updateUI();
+            setAudioStatus("Mic error");
+            document.getElementById('socketStatus').innerText = "MIC ERROR";
         }
-        await audioCtx.resume();
-        active = !active;
-        if (!active) stopTX();
-        updateUI();
-        syncWithServer();
     };
 
     function syncWithServer() {
@@ -189,47 +279,20 @@
 
     async function startTX() {
         if (isTalking || !active || !audioCtx) return;
-        isTalking = true;
-        resetTxBuffer();
-        document.getElementById('pttBtn').classList.add('active');
 
         try {
-            await audioCtx.resume();
+            await ensureAudioContext();
+            await startMicPipeline();
+            isTalking = true;
+            resetTxBuffer();
+            lastMicPeak = 0;
+            document.getElementById('pttBtn').classList.add('active');
             playBeep(1000, 0.06);
-
-            const selectedDevice = document.getElementById('micInput').value;
-            micStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    deviceId: selectedDevice ? { exact: selectedDevice } : undefined,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
-            });
-
-            sourceNode = audioCtx.createMediaStreamSource(micStream);
-
-            // Low Pass Filter to remove the high-frequency "static" that causes drift.
-            filterNode = audioCtx.createBiquadFilter();
-            filterNode.type = "lowpass";
-            filterNode.frequency.value = 6000;
-
-            workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
-            monitorGain = audioCtx.createGain();
-            monitorGain.gain.value = 0;
-
-            workletNode.port.onmessage = (e) => {
-                if (!isTalking || !active) return;
-                queueMicSamples(e.data);
-            };
-
-            sourceNode.connect(filterNode);
-            filterNode.connect(workletNode);
-            workletNode.connect(monitorGain);
-            monitorGain.connect(audioCtx.destination);
         } catch (err) {
             console.error('Unable to start microphone transmit', err);
             stopTX(false);
+            stopMicPipeline();
+            setAudioStatus("Mic error");
             document.getElementById('socketStatus').innerText = "MIC ERROR";
         }
     }
@@ -242,23 +305,15 @@
         if (playTone) playBeep(600, 0.08);
         document.getElementById('pttBtn').classList.remove('active');
         if (workletNode) {
-            workletNode.port.onmessage = null;
-            workletNode.disconnect();
+            workletNode.port.postMessage({ type: 'flush' });
         }
-        if (monitorGain) monitorGain.disconnect();
-        if (filterNode) filterNode.disconnect();
-        if (sourceNode) sourceNode.disconnect();
-        if (micStream) micStream.getTracks().forEach(t => t.stop());
-        sourceNode = null;
-        filterNode = null;
-        workletNode = null;
-        monitorGain = null;
-        micStream = null;
+        setAudioStatus(`Idle | TX ${txPackets} | RX ${rxPackets}`);
     }
 
     // --- RECEIVE (FORCED SYNC) ---
     socket.on('audio-out', (p) => {
         if (p.call === document.getElementById('callsign').value || !active || !audioCtx) return;
+        rxPackets++;
         
         const int16 = new Int16Array(p.data);
         let f32 = new Float32Array(int16.length);
@@ -274,13 +329,13 @@
         
         const now = audioCtx.currentTime;
 
-        // Socket.IO/browser timers are not real-time audio transport; keep a larger jitter cushion.
-        if (nextStartTime < now + 0.05 || nextStartTime > now + 0.75) {
-            nextStartTime = now + 0.25;
+        if (nextStartTime < now + JITTER_MIN || nextStartTime > now + JITTER_MAX) {
+            nextStartTime = now + JITTER_TARGET;
         }
 
         src.start(nextStartTime);
         nextStartTime += buf.duration;
+        setAudioStatus(`TX ${txPackets} | RX ${rxPackets} | Buffer ${Math.round((nextStartTime - now) * 1000)}ms`);
     });
 
     socket.on('connect', () => { document.getElementById('socketStatus').innerText = "ONLINE"; syncWithServer(); });
