@@ -99,26 +99,11 @@
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
-            constructor() {
-                super();
-                this.gain = ${DEFAULT_TX_GAIN};
-                this.port.onmessage = (event) => {
-                    if (event.data && event.data.type === 'gain') {
-                        this.gain = event.data.value;
-                    }
-                };
-            }
-
             process(ins) {
                 const input = ins[0][0];
                 if (!input) return true;
-                const output = new Float32Array(input.length);
 
-                for (let i = 0; i < input.length; i++) {
-                    output[i] = Math.max(-1, Math.min(1, input[i] * this.gain));
-                }
-
-                this.port.postMessage(output);
+                this.port.postMessage(new Float32Array(input));
                 return true;
             }
         }
@@ -190,6 +175,14 @@
 
     function resetTxBuffer() {
         txOffset = 0;
+    }
+
+    function applyInputSensitivity(samples) {
+        const output = new Float32Array(samples.length);
+        for (let i = 0; i < samples.length; i++) {
+            output[i] = Math.max(-1, Math.min(1, samples[i] * txGain));
+        }
+        return output;
     }
 
     function emitAudioPacket(samples, length = samples.length) {
@@ -326,13 +319,13 @@
         lowpassNode.Q.value = 0.7;
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
-        workletNode.port.postMessage({ type: 'gain', value: txGain });
         monitorGain = audioCtx.createGain();
         monitorGain.gain.value = 0;
 
         workletNode.port.onmessage = (e) => {
-            updateMicMeter(e.data);
-            if (isTalking && active) queueMicSamples(e.data);
+            const txSamples = applyInputSensitivity(e.data);
+            updateMicMeter(txSamples);
+            if (isTalking && active) queueMicSamples(txSamples);
         };
 
         sourceNode.connect(highpassNode);
@@ -439,9 +432,6 @@
     function setInputSensitivity(value) {
         txGain = Number(value) / 100;
         document.getElementById('inputSensitivityValue').innerText = `${Math.round(txGain * 100)}%`;
-        if (workletNode) {
-            workletNode.port.postMessage({ type: 'gain', value: txGain });
-        }
     }
 
     function requestTxStart() {
