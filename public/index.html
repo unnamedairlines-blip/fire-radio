@@ -76,7 +76,7 @@
 
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
-    const { ipcRenderer } = require('electron');
+    const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
     const socket = io("https://fire-radio.onrender.com");
     const PACKET_SIZE = 1024;
     const JITTER_TARGET = 0.12;
@@ -509,6 +509,8 @@
     }
 
     async function registerGlobalPtt() {
+        if (!ipcRenderer) return;
+
         const result = await ipcRenderer.invoke('register-global-ptt', pttKeyAccelerator);
         if (!result || !result.ok) {
             setAudioStatus(`Global hotkey unavailable: ${pttKeyAccelerator}`);
@@ -669,14 +671,16 @@
             setCallsignStatus(`CALLSIGN IN USE: ${info.callsign}`);
         }
     });
-    ipcRenderer.on('global-ptt-toggle', () => {
-        if (!active) return;
-        if (isTalking) {
-            stopTX();
-            return;
-        }
-        startTX();
-    });
+    if (ipcRenderer) {
+        ipcRenderer.on('global-ptt-toggle', () => {
+            if (!active) return;
+            if (isTalking) {
+                stopTX();
+                return;
+            }
+            startTX();
+        });
+    }
 
     navigator.mediaDevices.enumerateDevices().then(devs => {
         const sel = document.getElementById('micInput');
