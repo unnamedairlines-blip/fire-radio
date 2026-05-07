@@ -83,30 +83,62 @@
         registerProcessor('radio-processor', P);
     `;
 
-    function playTone(freq, start, dur, volume = 0.035) {
+    function playTone(freq, start, dur, volume = 0.035, type = "square") {
         if (!audioCtx) return;
         const osc = audioCtx.createOscillator();
         const g = audioCtx.createGain();
         const t = audioCtx.currentTime + start;
 
-        osc.type = "sine";
+        osc.type = type;
         osc.frequency.setValueAtTime(freq, t);
         g.gain.setValueAtTime(0.001, t);
-        g.gain.exponentialRampToValueAtTime(volume, t + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        g.gain.linearRampToValueAtTime(volume, t + 0.004);
+        g.gain.setValueAtTime(volume, t + Math.max(0.004, dur - 0.012));
+        g.gain.linearRampToValueAtTime(0.001, t + dur);
         osc.connect(g); g.connect(audioCtx.destination);
         osc.start(t); osc.stop(t + dur + 0.02);
+    }
+
+    function playNoiseBurst(start, dur, volume = 0.012) {
+        if (!audioCtx) return;
+
+        const sampleCount = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
+        const buffer = audioCtx.createBuffer(1, sampleCount, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+
+        for (let i = 0; i < sampleCount; i++) {
+            data[i] = (Math.random() * 2 - 1) * (1 - i / sampleCount);
+        }
+
+        const src = audioCtx.createBufferSource();
+        const filter = audioCtx.createBiquadFilter();
+        const g = audioCtx.createGain();
+        const t = audioCtx.currentTime + start;
+
+        filter.type = "bandpass";
+        filter.frequency.value = 1800;
+        filter.Q.value = 1.4;
+        g.gain.setValueAtTime(volume, t);
+        g.gain.linearRampToValueAtTime(0.001, t + dur);
+
+        src.buffer = buffer;
+        src.connect(filter);
+        filter.connect(g);
+        g.connect(audioCtx.destination);
+        src.start(t);
+        src.stop(t + dur);
     }
 
     function playRadioBeep(type) {
         if (!audioCtx) return;
 
         if (type === "start") {
-            playTone(880, 0, 0.055, 0.03);
-            playTone(1320, 0.06, 0.075, 0.035);
+            playNoiseBurst(0, 0.025, 0.01);
+            playTone(1800, 0.018, 0.045, 0.018, "square");
+            playTone(1200, 0.066, 0.045, 0.016, "square");
         } else {
-            playTone(1320, 0, 0.045, 0.03);
-            playTone(740, 0.05, 0.09, 0.032);
+            playTone(900, 0, 0.07, 0.018, "square");
+            playNoiseBurst(0.065, 0.03, 0.009);
         }
     }
 
