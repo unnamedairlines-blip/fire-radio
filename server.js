@@ -9,6 +9,16 @@ app.use(express.static('public'));
 
 const unitRegistry = {};
 const channelTransmitters = {};
+const callsignOwners = {};
+
+function releaseCallsign(socketId) {
+    const unit = unitRegistry[socketId];
+    if (!unit || !unit.callsign) return;
+
+    if (callsignOwners[unit.callsign] === socketId) {
+        delete callsignOwners[unit.callsign];
+    }
+}
 
 function releaseTransmitter(socketId) {
     const unit = unitRegistry[socketId];
@@ -21,26 +31,39 @@ function releaseTransmitter(socketId) {
 }
 
 io.on('connection', (socket) => {
-    socket.on('update-status', (status) => {
+    socket.on('update-status', (status, ack) => {
         const existing = unitRegistry[socket.id] || {};
         const callsign = String(status.callsign || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
         const activeChannel = status.activeChannel ? String(status.activeChannel) : null;
+
+        const callOwner = callsignOwners[callsign];
+        if (callOwner && callOwner !== socket.id) {
+            if (ack) ack({ ok: false, reason: 'callsign-taken', callsign });
+            socket.emit('callsign-rejected', { callsign, reason: 'taken' });
+            return;
+        }
 
         if (existing.activeChannel && existing.activeChannel !== activeChannel) {
             releaseTransmitter(socket.id);
             socket.leave(existing.activeChannel);
         }
 
+        if (existing.callsign && existing.callsign !== callsign) {
+            releaseCallsign(socket.id);
+        }
+
         if (activeChannel) {
             socket.join(activeChannel);
         }
 
+        callsignOwners[callsign] = socket.id;
         unitRegistry[socket.id] = {
             callsign,
             activeChannel,
             transmitting: existing.activeChannel === activeChannel ? existing.transmitting || false : false
         };
         io.emit('unit-list-update', unitRegistry);
+        if (ack) ack({ ok: true, callsign });
     });
 
     socket.on('tx-status', (status, ack) => {
@@ -85,6 +108,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
+        releaseCallsign(socket.id);
         releaseTransmitter(socket.id);
         delete unitRegistry[socket.id];
         io.emit('unit-list-update', unitRegistry);

@@ -1,5 +1,8 @@
-const { app, BrowserWindow, session } = require('electron');
+const { app, BrowserWindow, session, globalShortcut, ipcMain } = require('electron');
 const path = require('path');
+
+let mainWindow = null;
+let registeredAccelerator = null;
 
 function allowMicrophoneAccess() {
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -12,7 +15,7 @@ function allowMicrophoneAccess() {
 function createWindow() {
   allowMicrophoneAccess();
 
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1100,
     height: 850,
     title: "Fire Radio Dispatch Console",
@@ -22,8 +25,29 @@ function createWindow() {
     }
   });
 
-  win.loadFile(path.join(__dirname, 'public/index.html'));
-  win.setMenuBarVisibility(false);
+  mainWindow.loadFile(path.join(__dirname, 'public/index.html'));
+  mainWindow.setMenuBarVisibility(false);
+}
+
+function registerGlobalPtt(accelerator) {
+  if (registeredAccelerator) {
+    globalShortcut.unregister(registeredAccelerator);
+    registeredAccelerator = null;
+  }
+
+  if (!accelerator) return false;
+
+  const registered = globalShortcut.register(accelerator, () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (BrowserWindow.getFocusedWindow() === mainWindow) return;
+    mainWindow.webContents.send('global-ptt-toggle');
+  });
+
+  if (registered) {
+    registeredAccelerator = accelerator;
+  }
+
+  return registered;
 }
 
 // Set permissions for media devices in Electron
@@ -31,6 +55,11 @@ app.commandLine.appendSwitch('enable-features', 'AudioServiceSandbox');
 
 app.whenReady().then(createWindow);
 
+ipcMain.handle('register-global-ptt', (_event, accelerator) => {
+  return { ok: registerGlobalPtt(accelerator) };
+});
+
 app.on('window-all-closed', () => {
+  globalShortcut.unregisterAll();
   if (process.platform !== 'darwin') app.quit();
 });

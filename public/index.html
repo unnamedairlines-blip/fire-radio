@@ -76,6 +76,7 @@
 
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
+    const { ipcRenderer } = require('electron');
     const socket = io("https://fire-radio.onrender.com");
     const PACKET_SIZE = 1024;
     const JITTER_TARGET = 0.12;
@@ -83,12 +84,15 @@
     const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
     const DEFAULT_TX_GAIN = 1.35;
+    const RX_TARGET_RMS = 0.09;
+    const RX_MIN_GAIN = 0.75;
+    const RX_MAX_GAIN = 4.5;
     const CHANNELS = [
         { id: 'dispatch', name: 'Dispatch' },
         { id: 'fireground-1', name: 'Fireground 1' },
         { id: 'tac-2', name: 'TAC 2' }
     ];
-    let pttKey = "Space", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
+    let pttKeyCode = "Space", pttKeyAccelerator = "Space", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
     let txGain = DEFAULT_TX_GAIN;
     let pointerPttId = null;
@@ -96,6 +100,8 @@
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
     let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
     let micMeterLevel = 0, lastMeterUpdate = 0;
+    let rxPlaybackGain = 1;
+    let lastAcceptedCallsign = document.getElementById('callsign').value.trim().toUpperCase() || 'UNKNOWN';
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -173,6 +179,10 @@
         document.getElementById('audioStatus').innerText = text;
     }
 
+    function setCallsignStatus(text) {
+        document.getElementById('socketStatus').innerText = text;
+    }
+
     function resetTxBuffer() {
         txOffset = 0;
     }
@@ -211,6 +221,28 @@
                 resetTxBuffer();
             }
         }
+    }
+
+    function normalizePlaybackAudio(samples) {
+        let sumSquares = 0;
+
+        for (let i = 0; i < samples.length; i++) {
+            sumSquares += samples[i] * samples[i];
+        }
+
+        const rms = samples.length ? Math.sqrt(sumSquares / samples.length) : 0;
+        const targetGain = rms > 0.0001 ? Math.min(RX_MAX_GAIN, Math.max(RX_MIN_GAIN, RX_TARGET_RMS / rms)) : 1;
+        rxPlaybackGain = rxPlaybackGain * 0.88 + targetGain * 0.12;
+
+        const output = new Float32Array(samples.length);
+        for (let i = 0; i < samples.length; i++) {
+            let value = samples[i] * rxPlaybackGain;
+            if (value > 0.95) value = 0.95 + (value - 0.95) * 0.2;
+            if (value < -0.95) value = -0.95 + (value + 0.95) * 0.2;
+            output[i] = value;
+        }
+
+        return output;
     }
 
     function updateMicMeter(samples) {
@@ -352,20 +384,43 @@
         resetMicMeter();
     }
 
+    function codeToAccelerator(code) {
+        const map = {
+            Space: 'Space',
+            Minus: '-',
+            Equal: '=',
+            BracketLeft: '[',
+            BracketRight: ']',
+            Backslash: '\\',
+            Semicolon: ';',
+            Quote: "'",
+            Comma: ',',
+            Period: '.',
+            Slash: '/',
+            Backquote: '`'
+        };
+
+        if (code.startsWith('Key')) return code.slice(3);
+        if (code.startsWith('Digit')) return code.slice(5);
+        return map[code] || code;
+    }
+
     document.getElementById('keybindBtn').onclick = () => { isBinding = true; document.getElementById('keybindBtn').innerText = "PUSH KEY..."; };
     window.onkeydown = (e) => {
         if (isBinding) {
-            e.preventDefault(); pttKey = e.code;
-            document.getElementById('keybindBtn').innerText = pttKey.toUpperCase();
-            isBinding = false; updateUI(); return;
+            e.preventDefault();
+            pttKeyCode = e.code;
+            pttKeyAccelerator = codeToAccelerator(e.code);
+            document.getElementById('keybindBtn').innerText = pttKeyAccelerator.toUpperCase();
+            isBinding = false; updateUI(); registerGlobalPtt(); return;
         }
-        if (e.code === pttKey && !e.repeat && active) {
+        if (e.code === pttKeyCode && !e.repeat && active) {
             e.preventDefault();
             startTX();
         }
     };
     window.onkeyup = (e) => {
-        if (e.code === pttKey) {
+        if (e.code === pttKeyCode) {
             e.preventDefault();
             stopTX();
         }
@@ -422,7 +477,26 @@
     }
 
     function syncWithServer() {
-        socket.emit('update-status', { callsign: document.getElementById('callsign').value, activeChannel });
+        const callsignInput = document.getElementById('callsign');
+        const requestedCallsign = callsignInput.value.trim().toUpperCase() || 'UNKNOWN';
+
+        socket.emit('update-status', { callsign: requestedCallsign, activeChannel }, (response) => {
+            if (!response || !response.ok) {
+                if (response && response.reason === 'callsign-taken') {
+                    callsignInput.value = lastAcceptedCallsign;
+                    setCallsignStatus(`CALLSIGN IN USE: ${response.callsign}`);
+                }
+                return;
+            }
+
+            lastAcceptedCallsign = response.callsign;
+            if (callsignInput.value !== response.callsign) {
+                callsignInput.value = response.callsign;
+            }
+            if (document.getElementById('socketStatus').innerText.startsWith('CALLSIGN IN USE')) {
+                setCallsignStatus('ONLINE');
+            }
+        });
     }
 
     function setInputSensitivity(value) {
@@ -431,6 +505,13 @@
         document.getElementById('inputSensitivityValue').innerText = `${labelValue}%`;
         if (inputGainNode && audioCtx) {
             inputGainNode.gain.setTargetAtTime(txGain, audioCtx.currentTime, 0.02);
+        }
+    }
+
+    async function registerGlobalPtt() {
+        const result = await ipcRenderer.invoke('register-global-ptt', pttKeyAccelerator);
+        if (!result || !result.ok) {
+            setAudioStatus(`Global hotkey unavailable: ${pttKeyAccelerator}`);
         }
     }
 
@@ -458,7 +539,7 @@
         });
         ptt.disabled = !active;
         ptt.classList.toggle('ready', active);
-        ptt.innerText = active ? `HOLD ${pttKey.replace('Key','')}` : "OFF AIR";
+        ptt.innerText = active ? `HOLD ${pttKeyAccelerator}` : "OFF AIR";
     }
 
     function escapeHtml(value) {
@@ -554,6 +635,7 @@
         let f32 = new Float32Array(int16.length);
         for(let i=0; i<int16.length; i++) f32[i] = int16[i] / MAX_INT16;
         f32 = resampleLinear(f32, p.sampleRate, audioCtx.sampleRate);
+        f32 = normalizePlaybackAudio(f32);
         
         const buf = audioCtx.createBuffer(1, f32.length, audioCtx.sampleRate);
         buf.getChannelData(0).set(f32);
@@ -581,6 +663,20 @@
         if (status.activeChannel !== activeChannel) return;
         if (audioCtx && active) playRadioBeep(status.transmitting ? "start" : "stop");
     });
+    socket.on('callsign-rejected', (info) => {
+        if (info && info.callsign) {
+            document.getElementById('callsign').value = lastAcceptedCallsign;
+            setCallsignStatus(`CALLSIGN IN USE: ${info.callsign}`);
+        }
+    });
+    ipcRenderer.on('global-ptt-toggle', () => {
+        if (!active) return;
+        if (isTalking) {
+            stopTX();
+            return;
+        }
+        startTX();
+    });
 
     navigator.mediaDevices.enumerateDevices().then(devs => {
         const sel = document.getElementById('micInput');
@@ -600,6 +696,7 @@
         document.querySelector(`[data-channel-connect="${channel.id}"]`).addEventListener('click', () => setActiveChannel(channel.id));
     });
     updateUI();
+    registerGlobalPtt();
 </script>
 </body>
 </html>
