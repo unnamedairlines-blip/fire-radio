@@ -18,6 +18,10 @@
   },
   "build": {
     "appId": "com.fireradio.app",
+    "files": [
+      "**/*",
+      "!dist*/**"
+    ],
     "win": {
       "target": "portable",
       "signAndEditExecutable": false

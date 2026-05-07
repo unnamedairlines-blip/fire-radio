@@ -13,11 +13,20 @@ io.on('connection', (socket) => {
     socket.on('update-status', (status) => {
         const existing = unitRegistry[socket.id] || {};
         const callsign = String(status.callsign || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
+        const activeChannel = status.activeChannel ? String(status.activeChannel) : null;
+
+        if (existing.activeChannel && existing.activeChannel !== activeChannel) {
+            socket.leave(existing.activeChannel);
+        }
+
+        if (activeChannel) {
+            socket.join(activeChannel);
+        }
 
         unitRegistry[socket.id] = {
             callsign,
-            activeChannel: status.activeChannel,
-            transmitting: existing.transmitting || false
+            activeChannel,
+            transmitting: existing.activeChannel === activeChannel ? existing.transmitting || false : false
         };
         io.emit('unit-list-update', unitRegistry);
     });
@@ -26,15 +35,22 @@ io.on('connection', (socket) => {
         if (!unitRegistry[socket.id]) return;
 
         unitRegistry[socket.id].transmitting = Boolean(status.transmitting);
-        socket.broadcast.emit('tx-status', {
+        socket.to(unitRegistry[socket.id].activeChannel).emit('tx-status', {
             callsign: unitRegistry[socket.id].callsign,
+            activeChannel: unitRegistry[socket.id].activeChannel,
             transmitting: unitRegistry[socket.id].transmitting
         });
         io.emit('unit-list-update', unitRegistry);
     });
 
     socket.on('audio-packet', (packet) => {
-        socket.broadcast.emit('audio-out', packet);
+        const unit = unitRegistry[socket.id];
+        if (!unit || !unit.activeChannel) return;
+
+        socket.to(unit.activeChannel).emit('audio-out', {
+            ...packet,
+            channel: unit.activeChannel
+        });
     });
 
     socket.on('disconnect', () => {
