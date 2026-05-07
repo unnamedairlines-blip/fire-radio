@@ -2,3 +2,4 @@ node_modules/
 dist/
 dist-low-latency/
 dist-audio-cleanup/
+dist-audio-simple/

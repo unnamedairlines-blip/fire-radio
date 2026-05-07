@@ -56,9 +56,7 @@
     const JITTER_MIN = 0.03;
     const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
-    const TX_GAIN = 1.8;
-    const NOISE_FLOOR = 0.012;
-    const NOISE_KNEE = 0.045;
+    const TX_GAIN = 1.35;
     let pttKey = "Space", isBinding = false, isTalking = false, active = false;
     let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
@@ -72,17 +70,7 @@
                 const output = new Float32Array(input.length);
 
                 for (let i = 0; i < input.length; i++) {
-                    const sample = input[i];
-                    const level = Math.abs(sample);
-                    let gain = ${TX_GAIN};
-
-                    if (level < ${NOISE_FLOOR}) {
-                        gain = 0;
-                    } else if (level < ${NOISE_KNEE}) {
-                        gain *= (level - ${NOISE_FLOOR}) / (${NOISE_KNEE} - ${NOISE_FLOOR});
-                    }
-
-                    output[i] = Math.max(-1, Math.min(1, sample * gain));
+                    output[i] = Math.max(-1, Math.min(1, input[i] * ${TX_GAIN}));
                 }
 
                 this.port.postMessage(output);
@@ -181,7 +169,7 @@
             audio: {
                 deviceId: selectedDevice ? { exact: selectedDevice } : undefined,
                 echoCancellation: false,
-                noiseSuppression: false,
+                noiseSuppression: true,
                 autoGainControl: false,
                 sampleRate: audioCtx.sampleRate
             }
@@ -191,12 +179,12 @@
 
         highpassNode = audioCtx.createBiquadFilter();
         highpassNode.type = "highpass";
-        highpassNode.frequency.value = 120;
+        highpassNode.frequency.value = 80;
         highpassNode.Q.value = 0.7;
 
         lowpassNode = audioCtx.createBiquadFilter();
         lowpassNode.type = "lowpass";
-        lowpassNode.frequency.value = 5200;
+        lowpassNode.frequency.value = 6500;
         lowpassNode.Q.value = 0.7;
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
