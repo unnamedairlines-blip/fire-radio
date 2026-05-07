@@ -11,10 +11,25 @@ const unitRegistry = {};
 
 io.on('connection', (socket) => {
     socket.on('update-status', (status) => {
+        const existing = unitRegistry[socket.id] || {};
+        const callsign = String(status.callsign || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
+
         unitRegistry[socket.id] = {
-            callsign: status.callsign.toUpperCase(),
-            activeChannel: status.activeChannel
+            callsign,
+            activeChannel: status.activeChannel,
+            transmitting: existing.transmitting || false
         };
+        io.emit('unit-list-update', unitRegistry);
+    });
+
+    socket.on('tx-status', (status) => {
+        if (!unitRegistry[socket.id]) return;
+
+        unitRegistry[socket.id].transmitting = Boolean(status.transmitting);
+        socket.broadcast.emit('tx-status', {
+            callsign: unitRegistry[socket.id].callsign,
+            transmitting: unitRegistry[socket.id].transmitting
+        });
         io.emit('unit-list-update', unitRegistry);
     });
 
