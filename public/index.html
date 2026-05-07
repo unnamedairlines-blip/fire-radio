@@ -28,6 +28,11 @@
         .settings-menu summary { cursor: pointer; font-size: 12px; color: #c9d1d9; font-weight: bold; text-transform: uppercase; }
         .setting-row { margin-top: 12px; }
         .setting-value { float: right; color: var(--accent); font-family: monospace; }
+        .mic-meter { height: 12px; background: #010409; border: 1px solid #30363d; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+        .mic-meter-fill { width: 0%; height: 100%; background: var(--green); transition: width 0.08s linear, background 0.08s linear; }
+        .mic-meter-fill.hot { background: #d29922; }
+        .mic-meter-fill.clip { background: var(--red); }
+        .mic-meter-label { display: block; margin-top: 6px; color: #8b949e; font-size: 11px; }
         label { font-size: 11px; color: #8b949e; text-transform: uppercase; font-weight: bold; }
     </style>
 </head>
@@ -48,6 +53,10 @@
                 <div class="setting-row">
                     <label for="inputSensitivity">Input Sensitivity <span class="setting-value" id="inputSensitivityValue">135%</span></label>
                     <input type="range" id="inputSensitivity" min="50" max="250" value="135" step="5">
+                    <div class="mic-meter" aria-hidden="true">
+                        <div class="mic-meter-fill" id="micMeterFill"></div>
+                    </div>
+                    <span class="mic-meter-label" id="micMeterLabel">Mic inactive</span>
                 </div>
             </details>
             <p style="font-size: 11px; color: #8b949e; margin-top: 15px;">Status: <span id="socketStatus">Connecting...</span></p>
@@ -86,6 +95,7 @@
     let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
     let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
+    let micMeterLevel = 0, lastMeterUpdate = 0;
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -218,6 +228,50 @@
         }
     }
 
+    function updateMicMeter(samples) {
+        let peak = 0;
+        for (let i = 0; i < samples.length; i++) {
+            peak = Math.max(peak, Math.abs(samples[i]));
+        }
+
+        micMeterLevel = Math.max(peak, micMeterLevel * 0.82);
+
+        const now = performance.now();
+        if (now - lastMeterUpdate < 45) return;
+        lastMeterUpdate = now;
+
+        const fill = document.getElementById('micMeterFill');
+        const label = document.getElementById('micMeterLabel');
+        const percent = Math.min(100, Math.round(micMeterLevel * 100));
+
+        fill.style.width = `${percent}%`;
+        fill.classList.toggle('hot', percent >= 70 && percent < 90);
+        fill.classList.toggle('clip', percent >= 90);
+
+        if (!active || !micStream) {
+            label.innerText = "Mic inactive";
+        } else if (percent < 8) {
+            label.innerText = "Input quiet";
+        } else if (percent < 70) {
+            label.innerText = `Input good - ${percent}%`;
+        } else if (percent < 90) {
+            label.innerText = `Input loud - ${percent}%`;
+        } else {
+            label.innerText = `Input clipping - ${percent}%`;
+        }
+    }
+
+    function resetMicMeter() {
+        micMeterLevel = 0;
+        const fill = document.getElementById('micMeterFill');
+        const label = document.getElementById('micMeterLabel');
+        if (fill) {
+            fill.style.width = "0%";
+            fill.classList.remove('hot', 'clip');
+        }
+        if (label) label.innerText = "Mic inactive";
+    }
+
     function resampleLinear(input, fromRate, toRate) {
         if (!fromRate || fromRate === toRate) return input;
 
@@ -277,8 +331,8 @@
         monitorGain.gain.value = 0;
 
         workletNode.port.onmessage = (e) => {
-            if (!isTalking || !active) return;
-            queueMicSamples(e.data);
+            updateMicMeter(e.data);
+            if (isTalking && active) queueMicSamples(e.data);
         };
 
         sourceNode.connect(highpassNode);
@@ -306,6 +360,7 @@
         workletNode = null;
         monitorGain = null;
         micStream = null;
+        resetMicMeter();
     }
 
     document.getElementById('keybindBtn').onclick = () => { isBinding = true; document.getElementById('keybindBtn').innerText = "PUSH KEY..."; };
