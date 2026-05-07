@@ -51,8 +51,8 @@
             <details class="settings-menu">
                 <summary>Settings</summary>
                 <div class="setting-row">
-                    <label for="inputSensitivity">Input Volume <span class="setting-value" id="inputSensitivityValue">135%</span></label>
-                    <input type="range" id="inputSensitivity" min="0" max="250" value="135" step="5">
+                    <label for="inputSensitivity">Input Volume <span class="setting-value" id="inputSensitivityValue">175%</span></label>
+                    <input type="range" id="inputSensitivity" min="0" max="300" value="175" step="5">
                     <div class="mic-meter" aria-hidden="true">
                         <div class="mic-meter-fill" id="micMeterFill"></div>
                     </div>
@@ -83,10 +83,10 @@
     const JITTER_MIN = 0.03;
     const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
-    const DEFAULT_TX_GAIN = 1.35;
-    const RX_TARGET_RMS = 0.09;
-    const RX_MIN_GAIN = 0.75;
-    const RX_MAX_GAIN = 4.5;
+    const DEFAULT_TX_GAIN = 1.75;
+    const RX_TARGET_RMS = 0.16;
+    const RX_MIN_GAIN = 1.1;
+    const RX_MAX_GAIN = 7.0;
     const CHANNELS = [
         { id: 'dispatch', name: 'Dispatch' },
         { id: 'fireground-1', name: 'Fireground 1' },
