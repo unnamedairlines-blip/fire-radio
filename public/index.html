@@ -51,8 +51,8 @@
             <details class="settings-menu">
                 <summary>Settings</summary>
                 <div class="setting-row">
-                    <label for="inputSensitivity">Input Sensitivity <span class="setting-value" id="inputSensitivityValue">135%</span></label>
-                    <input type="range" id="inputSensitivity" min="50" max="250" value="135" step="5">
+                    <label for="inputSensitivity">Input Volume <span class="setting-value" id="inputSensitivityValue">135%</span></label>
+                    <input type="range" id="inputSensitivity" min="0" max="250" value="135" step="5">
                     <div class="mic-meter" aria-hidden="true">
                         <div class="mic-meter-fill" id="micMeterFill"></div>
                     </div>
@@ -427,9 +427,10 @@
 
     function setInputSensitivity(value) {
         txGain = Number(value) / 100;
-        document.getElementById('inputSensitivityValue').innerText = `${Math.round(txGain * 100)}%`;
+        const labelValue = Math.round(txGain * 100);
+        document.getElementById('inputSensitivityValue').innerText = `${labelValue}%`;
         if (inputGainNode && audioCtx) {
-            inputGainNode.gain.setTargetAtTime(txGain, audioCtx.currentTime, 0.01);
+            inputGainNode.gain.setTargetAtTime(txGain, audioCtx.currentTime, 0.02);
         }
     }
 
