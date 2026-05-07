@@ -56,8 +56,11 @@
     const JITTER_MIN = 0.03;
     const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
+    const TX_GAIN = 1.8;
+    const NOISE_FLOOR = 0.012;
+    const NOISE_KNEE = 0.045;
     let pttKey = "Space", isBinding = false, isTalking = false, active = false;
-    let audioCtx, micStream, sourceNode, filterNode, workletNode, monitorGain, nextStartTime = 0;
+    let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
     let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
 
@@ -66,7 +69,23 @@
             process(ins) {
                 const input = ins[0][0];
                 if (!input) return true;
-                this.port.postMessage(input.slice());
+                const output = new Float32Array(input.length);
+
+                for (let i = 0; i < input.length; i++) {
+                    const sample = input[i];
+                    const level = Math.abs(sample);
+                    let gain = ${TX_GAIN};
+
+                    if (level < ${NOISE_FLOOR}) {
+                        gain = 0;
+                    } else if (level < ${NOISE_KNEE}) {
+                        gain *= (level - ${NOISE_FLOOR}) / (${NOISE_KNEE} - ${NOISE_FLOOR});
+                    }
+
+                    output[i] = Math.max(-1, Math.min(1, sample * gain));
+                }
+
+                this.port.postMessage(output);
                 return true;
             }
         }
@@ -170,9 +189,15 @@
 
         sourceNode = audioCtx.createMediaStreamSource(micStream);
 
-        filterNode = audioCtx.createBiquadFilter();
-        filterNode.type = "lowpass";
-        filterNode.frequency.value = 6000;
+        highpassNode = audioCtx.createBiquadFilter();
+        highpassNode.type = "highpass";
+        highpassNode.frequency.value = 120;
+        highpassNode.Q.value = 0.7;
+
+        lowpassNode = audioCtx.createBiquadFilter();
+        lowpassNode.type = "lowpass";
+        lowpassNode.frequency.value = 5200;
+        lowpassNode.Q.value = 0.7;
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
         monitorGain = audioCtx.createGain();
@@ -183,8 +208,9 @@
             queueMicSamples(e.data);
         };
 
-        sourceNode.connect(filterNode);
-        filterNode.connect(workletNode);
+        sourceNode.connect(highpassNode);
+        highpassNode.connect(lowpassNode);
+        lowpassNode.connect(workletNode);
         workletNode.connect(monitorGain);
         monitorGain.connect(audioCtx.destination);
         setAudioStatus("Mic ready");
@@ -196,12 +222,14 @@
             workletNode.disconnect();
         }
         if (monitorGain) monitorGain.disconnect();
-        if (filterNode) filterNode.disconnect();
+        if (lowpassNode) lowpassNode.disconnect();
+        if (highpassNode) highpassNode.disconnect();
         if (sourceNode) sourceNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
 
         sourceNode = null;
-        filterNode = null;
+        highpassNode = null;
+        lowpassNode = null;
         workletNode = null;
         monitorGain = null;
         micStream = null;
