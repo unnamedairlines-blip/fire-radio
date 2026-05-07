@@ -8,6 +8,17 @@ const io = require('socket.io')(http, {
 app.use(express.static('public'));
 
 const unitRegistry = {};
+const channelTransmitters = {};
+
+function releaseTransmitter(socketId) {
+    const unit = unitRegistry[socketId];
+    if (!unit || !unit.activeChannel) return;
+
+    if (channelTransmitters[unit.activeChannel] === socketId) {
+        delete channelTransmitters[unit.activeChannel];
+    }
+    unit.transmitting = false;
+}
 
 io.on('connection', (socket) => {
     socket.on('update-status', (status) => {
@@ -16,6 +27,7 @@ io.on('connection', (socket) => {
         const activeChannel = status.activeChannel ? String(status.activeChannel) : null;
 
         if (existing.activeChannel && existing.activeChannel !== activeChannel) {
+            releaseTransmitter(socket.id);
             socket.leave(existing.activeChannel);
         }
 
@@ -31,21 +43,40 @@ io.on('connection', (socket) => {
         io.emit('unit-list-update', unitRegistry);
     });
 
-    socket.on('tx-status', (status) => {
-        if (!unitRegistry[socket.id]) return;
+    socket.on('tx-status', (status, ack) => {
+        const unit = unitRegistry[socket.id];
+        if (!unit || !unit.activeChannel) {
+            if (ack) ack({ ok: false, reason: 'not-connected' });
+            return;
+        }
 
-        unitRegistry[socket.id].transmitting = Boolean(status.transmitting);
-        socket.to(unitRegistry[socket.id].activeChannel).emit('tx-status', {
-            callsign: unitRegistry[socket.id].callsign,
-            activeChannel: unitRegistry[socket.id].activeChannel,
-            transmitting: unitRegistry[socket.id].transmitting
+        if (status.transmitting) {
+            const currentTransmitter = channelTransmitters[unit.activeChannel];
+            if (currentTransmitter && currentTransmitter !== socket.id) {
+                const currentUnit = unitRegistry[currentTransmitter];
+                if (ack) ack({ ok: false, reason: 'channel-busy', callsign: currentUnit ? currentUnit.callsign : 'UNKNOWN' });
+                return;
+            }
+
+            channelTransmitters[unit.activeChannel] = socket.id;
+            unit.transmitting = true;
+        } else if (channelTransmitters[unit.activeChannel] === socket.id) {
+            releaseTransmitter(socket.id);
+        }
+
+        socket.to(unit.activeChannel).emit('tx-status', {
+            callsign: unit.callsign,
+            activeChannel: unit.activeChannel,
+            transmitting: unit.transmitting
         });
         io.emit('unit-list-update', unitRegistry);
+        if (ack) ack({ ok: true });
     });
 
     socket.on('audio-packet', (packet) => {
         const unit = unitRegistry[socket.id];
         if (!unit || !unit.activeChannel) return;
+        if (channelTransmitters[unit.activeChannel] !== socket.id) return;
 
         socket.to(unit.activeChannel).emit('audio-out', {
             ...packet,
@@ -54,6 +85,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
+        releaseTransmitter(socket.id);
         delete unitRegistry[socket.id];
         io.emit('unit-list-update', unitRegistry);
     });
