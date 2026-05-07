@@ -3,23 +3,9 @@
   "version": "1.0.0",
   "description": "Desktop Radio Broadcasting Console",
   "main": "main.js",
-  "scripts": {
-    "start": "electron .",
-    "build": "electron-builder"
-  },
   "dependencies": {
     "express": "^4.18.2",
     "socket.io": "^4.7.2",
     "socket.io-client": "^4.7.2"
-  },
-  "devDependencies": {
-    "electron": "^28.3.3",
-    "electron-builder": "^24.13.3"
-  },
-  "build": {
-    "appId": "com.fireradio.app",
-    "win": {
-      "target": "portable"
-    }
   }
 }

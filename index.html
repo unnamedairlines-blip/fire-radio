@@ -32,6 +32,7 @@
             <label>PTT Keybind</label>
             <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer; border-radius:6px;">SPACEBAR</button>
             <p style="font-size: 11px; color: #8b949e; margin-top: 15px;">Status: <span id="socketStatus">Connecting...</span></p>
+            <p style="font-size: 11px; color: #8b949e; margin-top: 4px;">Audio: <span id="audioStatus">Idle</span></p>
         </div>
     </div>
 
@@ -55,6 +56,7 @@
     let pttKey = "Space", isBinding = false, isTalking = false, active = false;
     let audioCtx, micStream, sourceNode, filterNode, workletNode, monitorGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
+    let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -79,6 +81,10 @@
         osc.start(); osc.stop(audioCtx.currentTime + dur);
     }
 
+    function setAudioStatus(text) {
+        document.getElementById('audioStatus').innerText = text;
+    }
+
     function resetTxBuffer() {
         txOffset = 0;
     }
@@ -95,10 +101,15 @@
             sampleRate: audioCtx.sampleRate,
             seq: txSequence++
         });
+        txPackets++;
+        setAudioStatus(`TX ${txPackets} | RX ${rxPackets} | Peak ${lastMicPeak.toFixed(2)}`);
     }
 
     function queueMicSamples(samples) {
         let readOffset = 0;
+        for (let i = 0; i < samples.length; i++) {
+            lastMicPeak = Math.max(lastMicPeak * 0.95, Math.abs(samples[i]));
+        }
 
         while (readOffset < samples.length) {
             const copyLength = Math.min(PACKET_SIZE - txOffset, samples.length - readOffset);
@@ -191,6 +202,8 @@
         if (isTalking || !active || !audioCtx) return;
         isTalking = true;
         resetTxBuffer();
+        lastMicPeak = 0;
+        setAudioStatus("Starting mic...");
         document.getElementById('pttBtn').classList.add('active');
 
         try {
@@ -230,6 +243,7 @@
         } catch (err) {
             console.error('Unable to start microphone transmit', err);
             stopTX(false);
+            setAudioStatus("Mic error");
             document.getElementById('socketStatus').innerText = "MIC ERROR";
         }
     }
@@ -254,11 +268,13 @@
         workletNode = null;
         monitorGain = null;
         micStream = null;
+        setAudioStatus(`Idle | TX ${txPackets} | RX ${rxPackets}`);
     }
 
     // --- RECEIVE (FORCED SYNC) ---
     socket.on('audio-out', (p) => {
         if (p.call === document.getElementById('callsign').value || !active || !audioCtx) return;
+        rxPackets++;
         
         const int16 = new Int16Array(p.data);
         let f32 = new Float32Array(int16.length);
@@ -281,6 +297,7 @@
 
         src.start(nextStartTime);
         nextStartTime += buf.duration;
+        setAudioStatus(`TX ${txPackets} | RX ${rxPackets} | Buffer ${Math.round((nextStartTime - now) * 1000)}ms`);
     });
 
     socket.on('connect', () => { document.getElementById('socketStatus').innerText = "ONLINE"; syncWithServer(); });
