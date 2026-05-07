@@ -92,33 +92,18 @@
     let isRequestingTx = false;
     let txGain = DEFAULT_TX_GAIN;
     let pointerPttId = null;
-    let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
+    let audioCtx, micStream, sourceNode, inputGainNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
     let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
     let micMeterLevel = 0, lastMeterUpdate = 0;
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
-            constructor() {
-                super();
-                this.gain = ${DEFAULT_TX_GAIN};
-                this.port.onmessage = (event) => {
-                    if (event.data && event.data.type === 'gain') {
-                        this.gain = event.data.value;
-                    }
-                };
-            }
-
             process(ins) {
                 const input = ins[0][0];
                 if (!input) return true;
-                const output = new Float32Array(input.length);
 
-                for (let i = 0; i < input.length; i++) {
-                    output[i] = Math.max(-1, Math.min(1, input[i] * this.gain));
-                }
-
-                this.port.postMessage(output);
+                this.port.postMessage(new Float32Array(input));
                 return true;
             }
         }
@@ -314,6 +299,8 @@
         });
 
         sourceNode = audioCtx.createMediaStreamSource(micStream);
+        inputGainNode = audioCtx.createGain();
+        inputGainNode.gain.value = txGain;
 
         highpassNode = audioCtx.createBiquadFilter();
         highpassNode.type = "highpass";
@@ -326,7 +313,6 @@
         lowpassNode.Q.value = 0.7;
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
-        workletNode.port.postMessage({ type: 'gain', value: txGain });
         monitorGain = audioCtx.createGain();
         monitorGain.gain.value = 0;
 
@@ -335,7 +321,8 @@
             if (isTalking && active) queueMicSamples(e.data);
         };
 
-        sourceNode.connect(highpassNode);
+        sourceNode.connect(inputGainNode);
+        inputGainNode.connect(highpassNode);
         highpassNode.connect(lowpassNode);
         lowpassNode.connect(workletNode);
         workletNode.connect(monitorGain);
@@ -351,10 +338,12 @@
         if (monitorGain) monitorGain.disconnect();
         if (lowpassNode) lowpassNode.disconnect();
         if (highpassNode) highpassNode.disconnect();
+        if (inputGainNode) inputGainNode.disconnect();
         if (sourceNode) sourceNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
 
         sourceNode = null;
+        inputGainNode = null;
         highpassNode = null;
         lowpassNode = null;
         workletNode = null;
@@ -439,8 +428,8 @@
     function setInputSensitivity(value) {
         txGain = Number(value) / 100;
         document.getElementById('inputSensitivityValue').innerText = `${Math.round(txGain * 100)}%`;
-        if (workletNode) {
-            workletNode.port.postMessage({ type: 'gain', value: txGain });
+        if (inputGainNode && audioCtx) {
+            inputGainNode.gain.setTargetAtTime(txGain, audioCtx.currentTime, 0.01);
         }
     }
 
