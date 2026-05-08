@@ -51,8 +51,8 @@
             <details class="settings-menu">
                 <summary>Settings</summary>
                 <div class="setting-row">
-                    <label for="inputSensitivity">Input Volume <span class="setting-value" id="inputSensitivityValue">175%</span></label>
-                    <input type="range" id="inputSensitivity" min="0" max="300" value="175" step="5">
+                    <label for="inputSensitivity">Input Sensitivity <span class="setting-value" id="inputSensitivityValue">135%</span></label>
+                    <input type="range" id="inputSensitivity" min="0" max="250" value="135" step="5">
                     <div class="mic-meter" aria-hidden="true">
                         <div class="mic-meter-fill" id="micMeterFill"></div>
                     </div>
@@ -83,10 +83,12 @@
     const JITTER_MIN = 0.03;
     const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
-    const DEFAULT_TX_GAIN = 1.75;
-    const RX_TARGET_RMS = 0.16;
-    const RX_MIN_GAIN = 1.1;
-    const RX_MAX_GAIN = 7.0;
+    const DEFAULT_TX_GAIN = 1.35;
+    const RX_TARGET_RMS = 0.18;
+    const RX_NOISE_FLOOR = 0.012;
+    const RX_MIN_GAIN = 0.45;
+    const RX_MAX_GAIN = 10.0;
+    const RX_LIMIT = 0.92;
     const CHANNELS = [
         { id: 'dispatch', name: 'Dispatch' },
         { id: 'fireground-1', name: 'Fireground 1' },
@@ -225,20 +227,27 @@
 
     function normalizePlaybackAudio(samples) {
         let sumSquares = 0;
+        let peak = 0;
 
         for (let i = 0; i < samples.length; i++) {
             sumSquares += samples[i] * samples[i];
+            peak = Math.max(peak, Math.abs(samples[i]));
         }
 
         const rms = samples.length ? Math.sqrt(sumSquares / samples.length) : 0;
-        const targetGain = rms > 0.0001 ? Math.min(RX_MAX_GAIN, Math.max(RX_MIN_GAIN, RX_TARGET_RMS / rms)) : 1;
-        rxPlaybackGain = rxPlaybackGain * 0.88 + targetGain * 0.12;
+        const level = Math.max(rms, peak * 0.35);
+        const targetGain = level > RX_NOISE_FLOOR
+            ? Math.min(RX_MAX_GAIN, Math.max(RX_MIN_GAIN, RX_TARGET_RMS / level))
+            : 1;
+        const smoothing = targetGain < rxPlaybackGain ? 0.45 : 0.28;
+        rxPlaybackGain = rxPlaybackGain * (1 - smoothing) + targetGain * smoothing;
 
         const output = new Float32Array(samples.length);
         for (let i = 0; i < samples.length; i++) {
             let value = samples[i] * rxPlaybackGain;
-            if (value > 0.95) value = 0.95 + (value - 0.95) * 0.2;
-            if (value < -0.95) value = -0.95 + (value + 0.95) * 0.2;
+            if (value > RX_LIMIT) value = RX_LIMIT + (value - RX_LIMIT) * 0.12;
+            if (value < -RX_LIMIT) value = -RX_LIMIT + (value + RX_LIMIT) * 0.12;
+            value = Math.max(-1, Math.min(1, value));
             output[i] = value;
         }
 
