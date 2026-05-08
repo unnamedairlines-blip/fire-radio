@@ -10,6 +10,7 @@ app.use(express.static('public'));
 const unitRegistry = {};
 const channelTransmitters = {};
 const callsignOwners = {};
+const monitorChannels = {};
 
 function releaseCallsign(socketId) {
     const unit = unitRegistry[socketId];
@@ -28,6 +29,17 @@ function releaseTransmitter(socketId) {
         delete channelTransmitters[unit.activeChannel];
     }
     unit.transmitting = false;
+}
+
+function releaseMonitor(socket) {
+    const monitoredChannel = monitorChannels[socket.id];
+    if (!monitoredChannel) return;
+
+    const unit = unitRegistry[socket.id];
+    if (!unit || unit.activeChannel !== monitoredChannel) {
+        socket.leave(monitoredChannel);
+    }
+    delete monitorChannels[socket.id];
 }
 
 io.on('connection', (socket) => {
@@ -55,7 +67,9 @@ io.on('connection', (socket) => {
 
         if (existing.activeChannel && existing.activeChannel !== activeChannel) {
             releaseTransmitter(socket.id);
-            socket.leave(existing.activeChannel);
+            if (monitorChannels[socket.id] !== existing.activeChannel) {
+                socket.leave(existing.activeChannel);
+            }
         }
 
         if (existing.callsign && existing.callsign !== callsign) {
@@ -106,6 +120,25 @@ io.on('connection', (socket) => {
         if (ack) ack({ ok: true });
     });
 
+    socket.on('monitor-channel', (channelId, ack) => {
+        const nextChannel = channelId ? String(channelId) : null;
+        const previousChannel = monitorChannels[socket.id];
+        const unit = unitRegistry[socket.id];
+
+        if (previousChannel && previousChannel !== nextChannel && (!unit || unit.activeChannel !== previousChannel)) {
+            socket.leave(previousChannel);
+        }
+
+        if (nextChannel) {
+            socket.join(nextChannel);
+            monitorChannels[socket.id] = nextChannel;
+        } else {
+            delete monitorChannels[socket.id];
+        }
+
+        if (ack) ack({ ok: true, channel: nextChannel });
+    });
+
     socket.on('audio-packet', (packet) => {
         const unit = unitRegistry[socket.id];
         if (!unit || !unit.activeChannel) return;
@@ -118,6 +151,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
+        releaseMonitor(socket);
         releaseCallsign(socket.id);
         releaseTransmitter(socket.id);
         delete unitRegistry[socket.id];

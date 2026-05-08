@@ -17,17 +17,15 @@
         .channel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
         .channel-panel { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 12px; }
         .channel-panel.connected { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.35); }
+        .channel-panel.monitoring { border-color: #d29922; box-shadow: inset 0 0 0 1px rgba(210, 153, 34, 0.35); }
         .channel-panel h3 { margin: 0 0 10px 0; font-size: 15px; }
         .channel-panel .conn-btn { margin-bottom: 10px; }
         .channel-units { height: 150px; overflow-y: auto; padding: 8px; border-radius: 6px; background: #010409; border: 1px solid #21262d; font-size: 13px; }
         .conn-btn { width: 100%; padding: 12px; font-weight: bold; border-radius: 6px; border: none; background: #30363d; color: white; cursor: pointer; margin-bottom: 15px; }
         .conn-btn.active { background: var(--accent); }
+        .monitor-btn { width: 100%; padding: 10px; font-weight: bold; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: white; cursor: pointer; margin-bottom: 10px; }
+        .monitor-btn.active { background: #d29922; color: #010409; border-color: #d29922; }
         select, input { width: 100%; padding: 12px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; margin-bottom: 10px; }
-        input[type="range"] { padding: 0; accent-color: var(--accent); }
-        .settings-menu { border-top: 1px solid #30363d; margin-top: 16px; padding-top: 12px; }
-        .settings-menu summary { cursor: pointer; font-size: 12px; color: #c9d1d9; font-weight: bold; text-transform: uppercase; }
-        .setting-row { margin-top: 12px; }
-        .setting-value { float: right; color: var(--accent); font-family: monospace; }
         .mic-meter { height: 12px; background: #010409; border: 1px solid #30363d; border-radius: 999px; overflow: hidden; margin-top: 8px; }
         .mic-meter-fill { width: 0%; height: 100%; background: var(--green); transition: width 0.08s linear, background 0.08s linear; }
         .mic-meter-fill.hot { background: #d29922; }
@@ -48,17 +46,10 @@
             <select id="micInput"></select>
             <label>PTT Keybind</label>
             <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer; border-radius:6px;">SPACEBAR</button>
-            <details class="settings-menu">
-                <summary>Settings</summary>
-                <div class="setting-row">
-                    <label for="inputSensitivity">Input Sensitivity <span class="setting-value" id="inputSensitivityValue">135%</span></label>
-                    <input type="range" id="inputSensitivity" min="0" max="250" value="135" step="5">
-                    <div class="mic-meter" aria-hidden="true">
-                        <div class="mic-meter-fill" id="micMeterFill"></div>
-                    </div>
-                    <span class="mic-meter-label" id="micMeterLabel">Mic inactive</span>
-                </div>
-            </details>
+            <div class="mic-meter" aria-hidden="true">
+                <div class="mic-meter-fill" id="micMeterFill"></div>
+            </div>
+            <span class="mic-meter-label" id="micMeterLabel">Mic inactive</span>
             <p style="font-size: 11px; color: #8b949e; margin-top: 15px;">Status: <span id="socketStatus">Connecting...</span></p>
             <p style="font-size: 11px; color: #8b949e; margin-top: 4px;">Audio: <span id="audioStatus">Idle</span></p>
         </div>
@@ -83,7 +74,11 @@
     const JITTER_MIN = 0.03;
     const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
-    const DEFAULT_TX_GAIN = 1.35;
+    const TX_TARGET_RMS = 0.24;
+    const TX_NOISE_FLOOR = 0.004;
+    const TX_MIN_GAIN = 0.35;
+    const TX_MAX_GAIN = 16.0;
+    const TX_LIMIT = 0.9;
     const RX_TARGET_RMS = 0.35;
     const RX_NOISE_FLOOR = 0.003;
     const RX_MIN_GAIN = 0.35;
@@ -97,15 +92,16 @@
     ];
     let pttKeyCode = "Space", pttKeyAccelerator = "Space", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
-    let txGain = DEFAULT_TX_GAIN;
     let pointerPttId = null;
-    let audioCtx, micStream, sourceNode, inputGainNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
+    let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
     let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
     let micMeterLevel = 0, lastMeterUpdate = 0;
     const rxGainByCallsign = new Map();
     let lastAcceptedCallsign = '';
     let socketConnected = false;
+    let monitorChannel = null;
+    let txPacketGain = 1;
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -203,7 +199,9 @@
             return;
         }
 
-        setCallsignStatus(activeChannel ? `ONLINE - ${getChannelName(activeChannel)}` : "ONLINE");
+        const transmitStatus = activeChannel ? `TX ${getChannelName(activeChannel)}` : "NO TX CHANNEL";
+        const monitorStatus = monitorChannel ? ` | MON ${getChannelName(monitorChannel)}` : "";
+        setCallsignStatus(`ONLINE - ${transmitStatus}${monitorStatus}`);
     }
 
     function getRequestedCallsign() {
@@ -228,10 +226,36 @@
         txOffset = 0;
     }
 
+    function normalizeTransmitAudio(samples, length) {
+        let sumSquares = 0;
+
+        for (let i = 0; i < length; i++) {
+            sumSquares += samples[i] * samples[i];
+        }
+
+        const rms = length ? Math.sqrt(sumSquares / length) : 0;
+        const targetGain = rms > TX_NOISE_FLOOR
+            ? Math.min(TX_MAX_GAIN, Math.max(TX_MIN_GAIN, TX_TARGET_RMS / rms))
+            : 1;
+        const smoothing = targetGain < txPacketGain ? 0.75 : 0.55;
+        txPacketGain = txPacketGain * (1 - smoothing) + targetGain * smoothing;
+
+        const output = new Float32Array(length);
+        for (let i = 0; i < length; i++) {
+            let value = samples[i] * txPacketGain;
+            if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.12;
+            if (value < -TX_LIMIT) value = -TX_LIMIT + (value + TX_LIMIT) * 0.12;
+            output[i] = Math.max(-1, Math.min(1, value));
+        }
+
+        return output;
+    }
+
     function emitAudioPacket(samples, length = samples.length) {
+        const normalizedSamples = normalizeTransmitAudio(samples, length);
         const int16 = new Int16Array(length);
         for (let i = 0; i < length; i++) {
-            int16[i] = Math.max(-1, Math.min(1, samples[i])) * MAX_INT16;
+            int16[i] = normalizedSamples[i] * MAX_INT16;
         }
 
         socket.emit('audio-packet', {
@@ -379,8 +403,6 @@
         });
 
         sourceNode = audioCtx.createMediaStreamSource(micStream);
-        inputGainNode = audioCtx.createGain();
-        inputGainNode.gain.value = txGain;
 
         highpassNode = audioCtx.createBiquadFilter();
         highpassNode.type = "highpass";
@@ -401,8 +423,7 @@
             if (isTalking && active) queueMicSamples(e.data);
         };
 
-        sourceNode.connect(inputGainNode);
-        inputGainNode.connect(highpassNode);
+        sourceNode.connect(highpassNode);
         highpassNode.connect(lowpassNode);
         lowpassNode.connect(workletNode);
         workletNode.connect(monitorGain);
@@ -418,12 +439,10 @@
         if (monitorGain) monitorGain.disconnect();
         if (lowpassNode) lowpassNode.disconnect();
         if (highpassNode) highpassNode.disconnect();
-        if (inputGainNode) inputGainNode.disconnect();
         if (sourceNode) sourceNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
 
         sourceNode = null;
-        inputGainNode = null;
         highpassNode = null;
         lowpassNode = null;
         workletNode = null;
@@ -526,6 +545,32 @@
         }
     }
 
+    async function setMonitorChannel(channelId) {
+        if (!requireCallsign()) return;
+
+        try {
+            await ensureAudioContext();
+            monitorChannel = monitorChannel === channelId ? null : channelId;
+            nextStartTime = 0;
+            socket.emit('monitor-channel', monitorChannel, (response) => {
+                if (!response || !response.ok) {
+                    monitorChannel = null;
+                    setAudioStatus("Monitor unavailable");
+                }
+                updateUI();
+                refreshConnectionStatus();
+            });
+            updateUI();
+            refreshConnectionStatus();
+        } catch (err) {
+            console.error('Unable to start monitor audio', err);
+            monitorChannel = null;
+            updateUI();
+            refreshConnectionStatus();
+            setAudioStatus("Monitor error");
+        }
+    }
+
     function syncWithServer() {
         const callsignInput = document.getElementById('callsign');
         const requestedCallsign = getRequestedCallsign();
@@ -539,7 +584,9 @@
                 stopMicPipeline();
                 updateUI();
             }
+            monitorChannel = null;
             socket.emit('update-status', { callsign: '', activeChannel: null });
+            socket.emit('monitor-channel', null);
             refreshConnectionStatus();
             return;
         }
@@ -561,15 +608,6 @@
             }
             refreshConnectionStatus();
         });
-    }
-
-    function setInputSensitivity(value) {
-        txGain = Number(value) / 100;
-        const labelValue = Math.round(txGain * 100);
-        document.getElementById('inputSensitivityValue').innerText = `${labelValue}%`;
-        if (inputGainNode && audioCtx) {
-            inputGainNode.gain.setTargetAtTime(txGain, audioCtx.currentTime, 0.02);
-        }
     }
 
     async function registerGlobalPtt() {
@@ -596,12 +634,17 @@
         CHANNELS.forEach(channel => {
             const panel = document.querySelector(`[data-channel-panel="${channel.id}"]`);
             const btn = document.querySelector(`[data-channel-connect="${channel.id}"]`);
-            if (!panel || !btn) return;
+            const monitorBtn = document.querySelector(`[data-channel-monitor="${channel.id}"]`);
+            if (!panel || !btn || !monitorBtn) return;
 
             const isConnected = activeChannel === channel.id;
+            const isMonitoring = monitorChannel === channel.id;
             panel.classList.toggle('connected', isConnected);
+            panel.classList.toggle('monitoring', isMonitoring);
             btn.classList.toggle('active', isConnected);
+            monitorBtn.classList.toggle('active', isMonitoring);
             btn.innerText = isConnected ? "DISCONNECT" : "CONNECT";
+            monitorBtn.innerText = isMonitoring ? "STOP MONITOR" : "MONITOR";
         });
         ptt.disabled = !active;
         ptt.classList.toggle('ready', active);
@@ -664,6 +707,7 @@
 
             isTalking = true;
             resetTxBuffer();
+            txPacketGain = 1;
             lastMicPeak = 0;
             document.getElementById('pttBtn').classList.add('active');
             playRadioBeep("start");
@@ -695,7 +739,8 @@
 
     // --- RECEIVE (FORCED SYNC) ---
     socket.on('audio-out', (p) => {
-        if (p.call === document.getElementById('callsign').value || !active || !audioCtx || p.channel !== activeChannel) return;
+        const canReceiveChannel = p.channel === activeChannel || p.channel === monitorChannel;
+        if (p.call === document.getElementById('callsign').value || !audioCtx || !canReceiveChannel) return;
         rxPackets++;
         
         const int16 = new Int16Array(p.data);
@@ -735,8 +780,8 @@
         renderUnitList(units);
     });
     socket.on('tx-status', (status) => {
-        if (status.activeChannel !== activeChannel) return;
-        if (audioCtx && active) playRadioBeep(status.transmitting ? "start" : "stop");
+        if (status.activeChannel !== activeChannel && status.activeChannel !== monitorChannel) return;
+        if (audioCtx) playRadioBeep(status.transmitting ? "start" : "stop");
     });
     socket.on('callsign-rejected', (info) => {
         if (info && info.callsign) {
@@ -760,17 +805,18 @@
         devs.filter(d => d.kind === 'audioinput').forEach(d => sel.innerHTML += `<option value="${d.deviceId}">${d.label || 'Mic'}</option>`);
     });
     document.getElementById('callsign').onchange = syncWithServer;
-    document.getElementById('inputSensitivity').oninput = (e) => setInputSensitivity(e.target.value);
 
     document.getElementById('channelGrid').innerHTML = CHANNELS.map(channel => `
         <div class="channel-panel" data-channel-panel="${channel.id}">
             <h3>${escapeHtml(channel.name)}</h3>
             <button class="conn-btn" data-channel-connect="${channel.id}">CONNECT</button>
+            <button class="monitor-btn" data-channel-monitor="${channel.id}">MONITOR</button>
             <div class="channel-units" data-channel-units="${channel.id}">No units connected</div>
         </div>
     `).join('');
     CHANNELS.forEach(channel => {
         document.querySelector(`[data-channel-connect="${channel.id}"]`).addEventListener('click', () => setActiveChannel(channel.id));
+        document.querySelector(`[data-channel-monitor="${channel.id}"]`).addEventListener('click', () => setMonitorChannel(channel.id));
     });
     updateUI();
     registerGlobalPtt();
