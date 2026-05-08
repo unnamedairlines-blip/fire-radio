@@ -11,6 +11,7 @@ const unitRegistry = {};
 const channelTransmitters = {};
 const callsignOwners = {};
 const monitorChannels = {};
+const TONE_BOARD_CODE = process.env.TONE_BOARD_CODE || '2468';
 
 function releaseCallsign(socketId) {
     const unit = unitRegistry[socketId];
@@ -148,6 +149,32 @@ io.on('connection', (socket) => {
             ...packet,
             channel: unit.activeChannel
         });
+    });
+
+    socket.on('tone-packet', (packet, ack) => {
+        const channel = packet && packet.channel ? String(packet.channel) : null;
+        const code = packet && packet.code ? String(packet.code) : '';
+
+        if (code !== TONE_BOARD_CODE) {
+            if (ack) ack({ ok: false, reason: 'bad-code' });
+            return;
+        }
+
+        if (!channel || !packet.data || !packet.sampleRate) {
+            if (ack) ack({ ok: false, reason: 'bad-packet' });
+            return;
+        }
+
+        socket.to(channel).emit('audio-out', {
+            call: 'TONE BOARD',
+            channel,
+            data: packet.data,
+            sampleRate: packet.sampleRate,
+            seq: packet.seq || 0,
+            tone: true
+        });
+
+        if (ack) ack({ ok: true });
     });
 
     socket.on('disconnect', () => {

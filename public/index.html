@@ -25,6 +25,14 @@
         .conn-btn.active { background: var(--accent); }
         .monitor-btn { width: 100%; padding: 10px; font-weight: bold; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: white; cursor: pointer; margin-bottom: 10px; }
         .monitor-btn.active { background: #d29922; color: #010409; border-color: #d29922; }
+        .monitor-btn:disabled { opacity: 0.42; cursor: not-allowed; }
+        .tone-board { margin-top: 16px; border-top: 1px solid #30363d; padding-top: 14px; }
+        .tone-board h3 { margin: 0 0 10px 0; font-size: 15px; }
+        .tone-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+        .tone-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+        .tone-btn { padding: 12px 8px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: white; cursor: pointer; font-weight: bold; }
+        .tone-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .hidden { display: none; }
         select, input { width: 100%; padding: 12px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; margin-bottom: 10px; }
         .mic-meter { height: 12px; background: #010409; border: 1px solid #30363d; border-radius: 999px; overflow: hidden; margin-top: 8px; }
         .mic-meter-fill { width: 0%; height: 100%; background: var(--green); transition: width 0.08s linear, background 0.08s linear; }
@@ -52,6 +60,21 @@
             <span class="mic-meter-label" id="micMeterLabel">Mic inactive</span>
             <p style="font-size: 11px; color: #8b949e; margin-top: 15px;">Status: <span id="socketStatus">Connecting...</span></p>
             <p style="font-size: 11px; color: #8b949e; margin-top: 4px;">Audio: <span id="audioStatus">Idle</span></p>
+            <div class="tone-board">
+                <h3>Tone Board</h3>
+                <div id="toneLock">
+                    <label>Tone Code</label>
+                    <div class="tone-row">
+                        <input type="password" id="toneCode" placeholder="Enter code">
+                        <button class="tone-btn" id="toneUnlockBtn">UNLOCK</button>
+                    </div>
+                </div>
+                <div id="tonePanel" class="hidden">
+                    <label>Tone Channel</label>
+                    <select id="toneChannel"></select>
+                    <div class="tone-grid" id="toneGrid"></div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -74,21 +97,27 @@
     const JITTER_MIN = 0.03;
     const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
-    const TX_TARGET_RMS = 0.24;
+    const TX_TARGET_RMS = 0.16;
     const TX_NOISE_FLOOR = 0.004;
     const TX_MIN_GAIN = 0.35;
-    const TX_MAX_GAIN = 16.0;
-    const TX_LIMIT = 0.9;
-    const RX_TARGET_RMS = 0.35;
+    const TX_MAX_GAIN = 10.0;
+    const TX_LIMIT = 0.82;
+    const RX_TARGET_RMS = 0.18;
     const RX_NOISE_FLOOR = 0.003;
     const RX_MIN_GAIN = 0.35;
-    const RX_MAX_GAIN = 30.0;
-    const RX_LIMIT = 0.9;
-    const RX_OUTPUT_GAIN = 2.5;
+    const RX_MAX_GAIN = 12.0;
+    const RX_LIMIT = 0.82;
+    const RX_OUTPUT_GAIN = 1.15;
     const CHANNELS = [
         { id: 'fire-rto', name: 'Fire RTO' },
         { id: 'operations-1', name: 'Operations 1' },
         { id: 'operations-2', name: 'Operations 2' }
+    ];
+    const TONES = [
+        { id: 'alert', name: 'Alert', pairs: [[880, 0.22], [660, 0.22], [880, 0.22], [660, 0.22]] },
+        { id: 'dispatch', name: 'Dispatch', pairs: [[600, 0.35], [900, 0.35], [600, 0.35]] },
+        { id: 'evac', name: 'Evac', pairs: [[1200, 0.18], [0, 0.08], [1200, 0.18], [0, 0.08], [1200, 0.18]] },
+        { id: 'all-clear', name: 'All Clear', pairs: [[523, 0.18], [659, 0.18], [784, 0.35]] }
     ];
     let pttKeyCode = "Space", pttKeyAccelerator = "Space", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
@@ -102,6 +131,8 @@
     let socketConnected = false;
     let monitorChannel = null;
     let txPacketGain = 1;
+    let toneBoardCode = '';
+    let toneSequence = 0;
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -317,6 +348,87 @@
         return output;
     }
 
+    function synthesizeTone(tone) {
+        const sampleRate = audioCtx.sampleRate;
+        const pause = Math.floor(sampleRate * 0.04);
+        const totalSamples = tone.pairs.reduce((sum, pair) => sum + Math.floor(sampleRate * pair[1]) + pause, 0);
+        const samples = new Float32Array(totalSamples);
+        let offset = 0;
+
+        tone.pairs.forEach(([freq, duration]) => {
+            const length = Math.floor(sampleRate * duration);
+            for (let i = 0; i < length; i++) {
+                const envelope = Math.min(1, i / 120) * Math.min(1, (length - i) / 240);
+                samples[offset + i] = freq ? Math.sin((2 * Math.PI * freq * i) / sampleRate) * 0.22 * envelope : 0;
+            }
+            offset += length + pause;
+        });
+
+        return samples;
+    }
+
+    function playLocalSamples(samples) {
+        const buf = audioCtx.createBuffer(1, samples.length, audioCtx.sampleRate);
+        buf.getChannelData(0).set(samples);
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(audioCtx.destination);
+        src.start();
+    }
+
+    function emitToneSamples(samples, channel) {
+        let offset = 0;
+        while (offset < samples.length) {
+            const length = Math.min(PACKET_SIZE, samples.length - offset);
+            const int16 = new Int16Array(length);
+            for (let i = 0; i < length; i++) {
+                int16[i] = Math.max(-1, Math.min(1, samples[offset + i])) * MAX_INT16;
+            }
+
+            socket.emit('tone-packet', {
+                code: toneBoardCode,
+                channel,
+                data: int16.buffer,
+                sampleRate: audioCtx.sampleRate,
+                seq: toneSequence++
+            }, (response) => {
+                if (!response || !response.ok) {
+                    setAudioStatus(response && response.reason === 'bad-code' ? "Tone code rejected" : "Tone failed");
+                }
+            });
+            offset += length;
+        }
+    }
+
+    async function playToneBoardTone(toneId) {
+        const channel = document.getElementById('toneChannel').value;
+        const tone = TONES.find(t => t.id === toneId);
+        if (!tone || !channel) return;
+
+        try {
+            await ensureAudioContext();
+            const samples = synthesizeTone(tone);
+            playLocalSamples(samples);
+            emitToneSamples(samples, channel);
+            setAudioStatus(`Tone ${tone.name} -> ${getChannelName(channel)}`);
+        } catch (err) {
+            console.error('Unable to play tone', err);
+            setAudioStatus("Tone error");
+        }
+    }
+
+    function unlockToneBoard() {
+        toneBoardCode = document.getElementById('toneCode').value.trim();
+        if (!toneBoardCode) {
+            setAudioStatus("Tone code required");
+            return;
+        }
+
+        document.getElementById('toneLock').classList.add('hidden');
+        document.getElementById('tonePanel').classList.remove('hidden');
+        setAudioStatus("Tone board ready");
+    }
+
     function updateMicMeter(samples) {
         let peak = 0;
         for (let i = 0; i < samples.length; i++) {
@@ -522,6 +634,10 @@
             if (isTalking) stopTX(false);
             active = Boolean(nextChannel);
             activeChannel = nextChannel;
+            if (monitorChannel && monitorChannel === activeChannel) {
+                monitorChannel = null;
+                socket.emit('monitor-channel', null);
+            }
             nextStartTime = 0;
 
             if (active) {
@@ -547,6 +663,16 @@
 
     async function setMonitorChannel(channelId) {
         if (!requireCallsign()) return;
+        if (channelId === activeChannel) {
+            if (monitorChannel) {
+                monitorChannel = null;
+                socket.emit('monitor-channel', null);
+            }
+            setAudioStatus("Already on that channel");
+            updateUI();
+            refreshConnectionStatus();
+            return;
+        }
 
         try {
             await ensureAudioContext();
@@ -643,8 +769,9 @@
             panel.classList.toggle('monitoring', isMonitoring);
             btn.classList.toggle('active', isConnected);
             monitorBtn.classList.toggle('active', isMonitoring);
+            monitorBtn.disabled = isConnected;
             btn.innerText = isConnected ? "DISCONNECT" : "CONNECT";
-            monitorBtn.innerText = isMonitoring ? "STOP MONITOR" : "MONITOR";
+            monitorBtn.innerText = isConnected ? "ON CHANNEL" : (isMonitoring ? "STOP MONITOR" : "MONITOR");
         });
         ptt.disabled = !active;
         ptt.classList.toggle('ready', active);
@@ -805,6 +932,15 @@
         devs.filter(d => d.kind === 'audioinput').forEach(d => sel.innerHTML += `<option value="${d.deviceId}">${d.label || 'Mic'}</option>`);
     });
     document.getElementById('callsign').onchange = syncWithServer;
+    document.getElementById('toneUnlockBtn').addEventListener('click', unlockToneBoard);
+    document.getElementById('toneCode').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') unlockToneBoard();
+    });
+    document.getElementById('toneChannel').innerHTML = CHANNELS.map(channel => `<option value="${channel.id}">${escapeHtml(channel.name)}</option>`).join('');
+    document.getElementById('toneGrid').innerHTML = TONES.map(tone => `<button class="tone-btn" data-tone="${tone.id}">${escapeHtml(tone.name)}</button>`).join('');
+    TONES.forEach(tone => {
+        document.querySelector(`[data-tone="${tone.id}"]`).addEventListener('click', () => playToneBoardTone(tone.id));
+    });
 
     document.getElementById('channelGrid').innerHTML = CHANNELS.map(channel => `
         <div class="channel-panel" data-channel-panel="${channel.id}">
