@@ -55,7 +55,7 @@
             <label>Microphone</label>
             <select id="micInput"></select>
             <label>PTT Keybind</label>
-            <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer; border-radius:6px;">SEMICOLON</button>
+            <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer; border-radius:6px;">X</button>
             <div class="mic-meter" aria-hidden="true">
                 <div class="mic-meter-fill" id="micMeterFill"></div>
             </div>
@@ -122,7 +122,7 @@
         { id: 'evac', name: 'Evac', pairs: [[1200, 0.18], [0, 0.08], [1200, 0.18], [0, 0.08], [1200, 0.18]] },
         { id: 'all-clear', name: 'All Clear', pairs: [[523, 0.18], [659, 0.18], [784, 0.35]] }
     ];
-    let pttKeyCode = "Semicolon", pttKeyAccelerator = ";", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
+    let pttKeyCode = "KeyX", pttKeyAccelerator = "X", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
     let pointerPttId = null;
     let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
@@ -752,7 +752,10 @@
     async function registerGlobalPtt() {
         if (!ipcRenderer) return;
 
-        const result = await ipcRenderer.invoke('register-global-ptt', pttKeyAccelerator);
+        const result = await ipcRenderer.invoke('register-global-ptt', {
+            code: pttKeyCode,
+            accelerator: pttKeyAccelerator
+        });
         if (!result || !result.ok) {
             setAudioStatus(`Global hotkey unavailable: ${pttKeyAccelerator}`);
         }
@@ -933,13 +936,12 @@
         }
     });
     if (ipcRenderer) {
-        ipcRenderer.on('global-ptt-toggle', () => {
+        ipcRenderer.on('global-ptt-down', () => {
             if (!active) return;
-            if (isTalking) {
-                stopTX();
-                return;
-            }
             startTX();
+        });
+        ipcRenderer.on('global-ptt-up', () => {
+            stopTX();
         });
     }
 
