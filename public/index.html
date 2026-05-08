@@ -84,13 +84,14 @@
     const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
     const DEFAULT_TX_GAIN = 1.35;
-    const RX_TARGET_RMS = 0.28;
+    const RX_TARGET_RMS = 0.35;
     const RX_NOISE_FLOOR = 0.003;
     const RX_MIN_GAIN = 0.35;
-    const RX_MAX_GAIN = 18.0;
+    const RX_MAX_GAIN = 30.0;
     const RX_LIMIT = 0.9;
-    const RX_OUTPUT_GAIN = 3.0;
+    const RX_OUTPUT_GAIN = 2.5;
     const CHANNELS = [
+        { id: 'fire-rto', name: 'Fire RTO' },
         { id: 'operations-1', name: 'Operations 1' },
         { id: 'operations-2', name: 'Operations 2' }
     ];
@@ -104,6 +105,7 @@
     let micMeterLevel = 0, lastMeterUpdate = 0;
     const rxGainByCallsign = new Map();
     let lastAcceptedCallsign = '';
+    let socketConnected = false;
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -185,6 +187,25 @@
         document.getElementById('socketStatus').innerText = text;
     }
 
+    function getChannelName(channelId) {
+        const channel = CHANNELS.find(c => c.id === channelId);
+        return channel ? channel.name : '';
+    }
+
+    function refreshConnectionStatus() {
+        if (!socketConnected) {
+            setCallsignStatus("OFFLINE");
+            return;
+        }
+
+        if (!getRequestedCallsign()) {
+            setCallsignStatus("ONLINE - ENTER CALLSIGN");
+            return;
+        }
+
+        setCallsignStatus(activeChannel ? `ONLINE - ${getChannelName(activeChannel)}` : "ONLINE");
+    }
+
     function getRequestedCallsign() {
         return document.getElementById('callsign').value.trim().toUpperCase();
     }
@@ -197,7 +218,7 @@
             return callsign;
         }
 
-        setCallsignStatus("ENTER CALLSIGN");
+        refreshConnectionStatus();
         setAudioStatus("Callsign required");
         callsignInput.focus();
         return null;
@@ -260,8 +281,9 @@
         rxGainByCallsign.set(callsign, playbackGain);
 
         const output = new Float32Array(samples.length);
+        const finalGain = playbackGain * RX_OUTPUT_GAIN;
         for (let i = 0; i < samples.length; i++) {
-            let value = samples[i] * playbackGain;
+            let value = samples[i] * finalGain;
             if (value > RX_LIMIT) value = RX_LIMIT + (value - RX_LIMIT) * 0.12;
             if (value < -RX_LIMIT) value = -RX_LIMIT + (value + RX_LIMIT) * 0.12;
             value = Math.max(-1, Math.min(1, value));
@@ -517,7 +539,8 @@
                 stopMicPipeline();
                 updateUI();
             }
-            setCallsignStatus("ENTER CALLSIGN");
+            socket.emit('update-status', { callsign: '', activeChannel: null });
+            refreshConnectionStatus();
             return;
         }
 
@@ -536,9 +559,7 @@
             if (callsignInput.value !== response.callsign) {
                 callsignInput.value = response.callsign;
             }
-            if (document.getElementById('socketStatus').innerText.startsWith('CALLSIGN IN USE')) {
-                setCallsignStatus('ONLINE');
-            }
+            refreshConnectionStatus();
         });
     }
 
@@ -687,20 +708,8 @@
         buf.getChannelData(0).set(f32);
         
         const src = audioCtx.createBufferSource();
-        const outputGain = audioCtx.createGain();
-        const compressor = audioCtx.createDynamicsCompressor();
-
         src.buffer = buf;
-        outputGain.gain.value = RX_OUTPUT_GAIN;
-        compressor.threshold.value = -16;
-        compressor.knee.value = 10;
-        compressor.ratio.value = 8;
-        compressor.attack.value = 0.003;
-        compressor.release.value = 0.18;
-
-        src.connect(outputGain);
-        outputGain.connect(compressor);
-        compressor.connect(audioCtx.destination);
+        src.connect(audioCtx.destination);
         
         const now = audioCtx.currentTime;
 
@@ -713,7 +722,15 @@
         setAudioStatus(`TX ${txPackets} | RX ${rxPackets} | Buffer ${Math.round((nextStartTime - now) * 1000)}ms`);
     });
 
-    socket.on('connect', () => { document.getElementById('socketStatus').innerText = "ONLINE"; syncWithServer(); });
+    socket.on('connect', () => {
+        socketConnected = true;
+        refreshConnectionStatus();
+        syncWithServer();
+    });
+    socket.on('disconnect', () => {
+        socketConnected = false;
+        refreshConnectionStatus();
+    });
     socket.on('unit-list-update', (units) => {
         renderUnitList(units);
     });

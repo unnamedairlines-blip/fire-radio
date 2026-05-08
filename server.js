@@ -33,8 +33,18 @@ function releaseTransmitter(socketId) {
 io.on('connection', (socket) => {
     socket.on('update-status', (status, ack) => {
         const existing = unitRegistry[socket.id] || {};
-        const callsign = String(status.callsign || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
+        const callsign = String(status.callsign || '').trim().toUpperCase();
         const activeChannel = status.activeChannel ? String(status.activeChannel) : null;
+
+        if (!callsign) {
+            releaseCallsign(socket.id);
+            releaseTransmitter(socket.id);
+            if (existing.activeChannel) socket.leave(existing.activeChannel);
+            delete unitRegistry[socket.id];
+            io.emit('unit-list-update', unitRegistry);
+            if (ack) ack({ ok: false, reason: 'callsign-required' });
+            return;
+        }
 
         const callOwner = callsignOwners[callsign];
         if (callOwner && callOwner !== socket.id) {
