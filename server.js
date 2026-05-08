@@ -11,6 +11,7 @@ const unitRegistry = {};
 const channelTransmitters = {};
 const callsignOwners = {};
 const monitorChannels = {};
+const toneLocks = {};
 const TONE_BOARD_CODE = process.env.TONE_BOARD_CODE || '2468';
 const robloxUserCache = new Map();
 
@@ -31,6 +32,36 @@ function releaseTransmitter(socketId) {
         delete channelTransmitters[unit.activeChannel];
     }
     unit.transmitting = false;
+}
+
+function getToneLock(channel) {
+    const lock = toneLocks[channel];
+    if (!lock) return null;
+
+    if (lock.until <= Date.now()) {
+        delete toneLocks[channel];
+        return null;
+    }
+
+    return lock;
+}
+
+function lockToneChannel(channel, durationMs) {
+    const until = Date.now() + Math.max(500, Math.min(120000, Number(durationMs) || 0));
+    toneLocks[channel] = { until };
+
+    const transmitterId = channelTransmitters[channel];
+    if (transmitterId) {
+        const unit = unitRegistry[transmitterId];
+        if (unit) unit.transmitting = false;
+        delete channelTransmitters[channel];
+        io.to(channel).emit('tx-status', {
+            callsign: 'TONE BOARD',
+            activeChannel: channel,
+            transmitting: false
+        });
+        io.emit('unit-list-update', unitRegistry);
+    }
 }
 
 async function resolveRobloxUsername(username) {
@@ -129,6 +160,12 @@ io.on('connection', (socket) => {
         }
 
         if (status.transmitting) {
+            const toneLock = getToneLock(unit.activeChannel);
+            if (toneLock) {
+                if (ack) ack({ ok: false, reason: 'tone-active', msRemaining: toneLock.until - Date.now() });
+                return;
+            }
+
             const currentTransmitter = channelTransmitters[unit.activeChannel];
             if (currentTransmitter && currentTransmitter !== socket.id) {
                 const currentUnit = unitRegistry[currentTransmitter];
@@ -174,6 +211,7 @@ io.on('connection', (socket) => {
         const unit = unitRegistry[socket.id];
         if (!unit || !unit.activeChannel) return;
         if (channelTransmitters[unit.activeChannel] !== socket.id) return;
+        if (getToneLock(unit.activeChannel)) return;
 
         socket.to(unit.activeChannel).emit('audio-out', {
             ...packet,
@@ -193,6 +231,10 @@ io.on('connection', (socket) => {
         if (!channel || !packet.data || !packet.sampleRate) {
             if (ack) ack({ ok: false, reason: 'bad-packet' });
             return;
+        }
+
+        if (packet.start) {
+            lockToneChannel(channel, packet.durationMs);
         }
 
         socket.to(channel).emit('audio-out', {
