@@ -58,7 +58,8 @@ function lockToneChannel(channel, durationMs) {
         io.to(channel).emit('tx-status', {
             callsign: 'TONE BOARD',
             activeChannel: channel,
-            transmitting: false
+            transmitting: false,
+            senderId: null
         });
         io.emit('unit-list-update', unitRegistry);
     }
@@ -179,10 +180,11 @@ io.on('connection', (socket) => {
             releaseTransmitter(socket.id);
         }
 
-        socket.to(unit.activeChannel).emit('tx-status', {
+        io.to(unit.activeChannel).emit('tx-status', {
             callsign: unit.callsign,
             activeChannel: unit.activeChannel,
-            transmitting: unit.transmitting
+            transmitting: unit.transmitting,
+            senderId: socket.id
         });
         io.emit('unit-list-update', unitRegistry);
         if (ack) ack({ ok: true });
@@ -233,6 +235,12 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const sampleRate = Number(packet.sampleRate);
+        if (!Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 96000) {
+            if (ack) ack({ ok: false, reason: 'bad-packet' });
+            return;
+        }
+
         if (packet.start) {
             lockToneChannel(channel, packet.durationMs);
         }
@@ -241,7 +249,7 @@ io.on('connection', (socket) => {
             call: 'TONE BOARD',
             channel,
             data: packet.data,
-            sampleRate: packet.sampleRate,
+            sampleRate,
             seq: packet.seq || 0,
             tone: true
         });
