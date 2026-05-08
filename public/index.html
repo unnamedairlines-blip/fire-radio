@@ -100,11 +100,11 @@
     const JITTER_MIN = 0.03;
     const JITTER_MAX = 0.35;
     const MAX_INT16 = 0x7FFF;
-    const TX_TARGET_RMS = 0.14;
-    const TX_NOISE_FLOOR = 0.005;
-    const TX_GATE_FLOOR = 0.012;
-    const TX_MIN_GAIN = 0.45;
-    const TX_MAX_GAIN = 8.0;
+    const TX_TARGET_RMS = 0.16;
+    const TX_NOISE_FLOOR = 0.004;
+    const TX_GATE_FLOOR = 0.008;
+    const TX_MIN_GAIN = 0.35;
+    const TX_MAX_GAIN = 10.0;
     const TX_LIMIT = 0.82;
     const RX_TARGET_RMS = 0.18;
     const RX_NOISE_FLOOR = 0.003;
@@ -118,7 +118,10 @@
         { id: 'operations-2', name: 'Operations 2' }
     ];
     const TONES = [
-        { id: 'dispatch', name: 'Dispatch', file: 'tones/dispatch.mp3', pairs: [[600, 0.35], [900, 0.35], [600, 0.35]] }
+        { id: 'alert', name: 'Alert', pairs: [[880, 0.22], [660, 0.22], [880, 0.22], [660, 0.22]] },
+        { id: 'dispatch', name: 'Dispatch', pairs: [[600, 0.35], [900, 0.35], [600, 0.35]] },
+        { id: 'evac', name: 'Evac', pairs: [[1200, 0.18], [0, 0.08], [1200, 0.18], [0, 0.08], [1200, 0.18]] },
+        { id: 'all-clear', name: 'All Clear', pairs: [[523, 0.18], [659, 0.18], [784, 0.35]] }
     ];
     let pttKeyCode = "KeyX", pttKeyAccelerator = "X", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
@@ -273,11 +276,11 @@
         const targetGain = rms > TX_NOISE_FLOOR
             ? Math.min(TX_MAX_GAIN, Math.max(TX_MIN_GAIN, TX_TARGET_RMS / rms))
             : 1;
-        const smoothing = targetGain < txPacketGain ? 0.55 : 0.35;
+        const smoothing = targetGain < txPacketGain ? 0.75 : 0.55;
         txPacketGain = txPacketGain * (1 - smoothing) + targetGain * smoothing;
 
         const output = new Float32Array(length);
-        const gateMix = rms < TX_GATE_FLOOR ? 0.55 : 1;
+        const gateMix = rms < TX_GATE_FLOOR ? 0.75 : 1;
         for (let i = 0; i < length; i++) {
             let value = samples[i] * gateMix * txPacketGain;
             if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.12;
@@ -384,8 +387,6 @@
 
     function emitToneSamples(samples, channel) {
         let offset = 0;
-        let firstPacket = true;
-        const durationMs = Math.ceil((samples.length / audioCtx.sampleRate) * 1000);
         while (offset < samples.length) {
             const length = Math.min(PACKET_SIZE, samples.length - offset);
             const int16 = new Int16Array(length);
@@ -398,32 +399,13 @@
                 channel,
                 data: int16.buffer,
                 sampleRate: audioCtx.sampleRate,
-                seq: toneSequence++,
-                start: firstPacket,
-                durationMs
+                seq: toneSequence++
             }, (response) => {
                 if (!response || !response.ok) {
                     setAudioStatus(response && response.reason === 'bad-code' ? "Tone code rejected" : "Tone failed");
                 }
             });
-            firstPacket = false;
             offset += length;
-        }
-    }
-
-    async function loadToneSamples(tone) {
-        if (!tone.file) return synthesizeTone(tone);
-
-        try {
-            const response = await fetch(tone.file);
-            if (!response.ok) throw new Error(`Tone file missing: ${tone.file}`);
-            const arrayBuffer = await response.arrayBuffer();
-            const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-            const source = decoded.getChannelData(0);
-            return resampleLinear(new Float32Array(source), decoded.sampleRate, audioCtx.sampleRate);
-        } catch (err) {
-            console.warn('Using fallback generated tone', err);
-            return synthesizeTone(tone);
         }
     }
 
@@ -434,7 +416,7 @@
 
         try {
             await ensureAudioContext();
-            const samples = await loadToneSamples(tone);
+            const samples = synthesizeTone(tone);
             playLocalSamples(samples);
             emitToneSamples(samples, channel);
             setAudioStatus(`Tone ${tone.name} -> ${getChannelName(channel)}`);
@@ -536,7 +518,7 @@
                 deviceId: selectedDevice ? { exact: selectedDevice } : undefined,
                 echoCancellation: true,
                 noiseSuppression: true,
-                autoGainControl: true,
+                autoGainControl: false,
                 sampleRate: audioCtx.sampleRate
             }
         });
@@ -860,7 +842,7 @@
                 txHeld = false;
                 const busyText = txGrant.reason === 'channel-busy'
                     ? `Channel busy: ${txGrant.callsign || 'UNKNOWN'}`
-                    : (txGrant.reason === 'tone-active' ? "Tone active" : "Unable to transmit");
+                    : "Unable to transmit";
                 setAudioStatus(busyText);
                 return;
             }
