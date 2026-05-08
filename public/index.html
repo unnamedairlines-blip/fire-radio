@@ -43,7 +43,7 @@
         <div class="card">
             <h3 style="margin-top:0">Radio Config</h3>
             <label>Callsign</label>
-            <input type="text" id="callsign" value="UNIT-1">
+            <input type="text" id="callsign" value="" placeholder="Enter callsign" required>
             <label>Microphone</label>
             <select id="micInput"></select>
             <label>PTT Keybind</label>
@@ -89,10 +89,10 @@
     const RX_MIN_GAIN = 0.35;
     const RX_MAX_GAIN = 18.0;
     const RX_LIMIT = 0.9;
+    const RX_OUTPUT_GAIN = 3.0;
     const CHANNELS = [
-        { id: 'dispatch', name: 'Dispatch' },
-        { id: 'fireground-1', name: 'Fireground 1' },
-        { id: 'tac-2', name: 'TAC 2' }
+        { id: 'operations-1', name: 'Operations 1' },
+        { id: 'operations-2', name: 'Operations 2' }
     ];
     let pttKeyCode = "Space", pttKeyAccelerator = "Space", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
@@ -103,7 +103,7 @@
     let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
     let micMeterLevel = 0, lastMeterUpdate = 0;
     const rxGainByCallsign = new Map();
-    let lastAcceptedCallsign = document.getElementById('callsign').value.trim().toUpperCase() || 'UNKNOWN';
+    let lastAcceptedCallsign = '';
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -183,6 +183,24 @@
 
     function setCallsignStatus(text) {
         document.getElementById('socketStatus').innerText = text;
+    }
+
+    function getRequestedCallsign() {
+        return document.getElementById('callsign').value.trim().toUpperCase();
+    }
+
+    function requireCallsign() {
+        const callsignInput = document.getElementById('callsign');
+        const callsign = getRequestedCallsign();
+        if (callsign) {
+            callsignInput.value = callsign;
+            return callsign;
+        }
+
+        setCallsignStatus("ENTER CALLSIGN");
+        setAudioStatus("Callsign required");
+        callsignInput.focus();
+        return null;
     }
 
     function resetTxBuffer() {
@@ -455,6 +473,8 @@
     });
 
     async function setActiveChannel(channelId) {
+        if (!requireCallsign()) return;
+
         try {
             await ensureAudioContext();
             const nextChannel = activeChannel === channelId ? null : channelId;
@@ -486,7 +506,22 @@
 
     function syncWithServer() {
         const callsignInput = document.getElementById('callsign');
-        const requestedCallsign = callsignInput.value.trim().toUpperCase() || 'UNKNOWN';
+        const requestedCallsign = getRequestedCallsign();
+
+        if (!requestedCallsign) {
+            lastAcceptedCallsign = '';
+            if (active) {
+                active = false;
+                activeChannel = null;
+                stopTX(false);
+                stopMicPipeline();
+                updateUI();
+            }
+            setCallsignStatus("ENTER CALLSIGN");
+            return;
+        }
+
+        callsignInput.value = requestedCallsign;
 
         socket.emit('update-status', { callsign: requestedCallsign, activeChannel }, (response) => {
             if (!response || !response.ok) {
@@ -584,6 +619,7 @@
 
     async function startTX() {
         if (isTalking || isRequestingTx || !active || !audioCtx) return;
+        if (!requireCallsign()) return;
         txHeld = true;
         isRequestingTx = true;
 
@@ -651,8 +687,20 @@
         buf.getChannelData(0).set(f32);
         
         const src = audioCtx.createBufferSource();
+        const outputGain = audioCtx.createGain();
+        const compressor = audioCtx.createDynamicsCompressor();
+
         src.buffer = buf;
-        src.connect(audioCtx.destination);
+        outputGain.gain.value = RX_OUTPUT_GAIN;
+        compressor.threshold.value = -16;
+        compressor.knee.value = 10;
+        compressor.ratio.value = 8;
+        compressor.attack.value = 0.003;
+        compressor.release.value = 0.18;
+
+        src.connect(outputGain);
+        outputGain.connect(compressor);
+        compressor.connect(audioCtx.destination);
         
         const now = audioCtx.currentTime;
 
