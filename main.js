@@ -37,15 +37,18 @@ function registerGlobalPtt(accelerator) {
 
   if (!accelerator) return false;
 
-  const registered = globalShortcut.register(accelerator, () => {
+  const candidates = accelerator === ';' ? [';', 'Semicolon'] : [accelerator];
+  const onGlobalPtt = () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (BrowserWindow.getFocusedWindow() === mainWindow) return;
     mainWindow.webContents.send('global-ptt-toggle');
-  });
+  };
 
-  if (registered) {
-    registeredAccelerator = accelerator;
-  }
+  const registered = candidates.some(candidate => {
+    const ok = globalShortcut.register(candidate, onGlobalPtt);
+    if (ok) registeredAccelerator = candidate;
+    return ok;
+  });
 
   return registered;
 }

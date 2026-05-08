@@ -55,7 +55,7 @@
             <label>Microphone</label>
             <select id="micInput"></select>
             <label>PTT Keybind</label>
-            <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer; border-radius:6px;">SPACEBAR</button>
+            <button id="keybindBtn" style="width:100%; padding:10px; background:#21262d; color:white; border:1px solid #30363d; cursor:pointer; border-radius:6px;">SEMICOLON</button>
             <div class="mic-meter" aria-hidden="true">
                 <div class="mic-meter-fill" id="micMeterFill"></div>
             </div>
@@ -101,8 +101,7 @@
     const MAX_INT16 = 0x7FFF;
     const TX_TARGET_RMS = 0.16;
     const TX_NOISE_FLOOR = 0.004;
-    const TX_GATE_FLOOR = 0.014;
-    const TX_GATE_SAMPLE_FLOOR = 0.01;
+    const TX_GATE_FLOOR = 0.008;
     const TX_MIN_GAIN = 0.35;
     const TX_MAX_GAIN = 10.0;
     const TX_LIMIT = 0.82;
@@ -123,7 +122,7 @@
         { id: 'evac', name: 'Evac', pairs: [[1200, 0.18], [0, 0.08], [1200, 0.18], [0, 0.08], [1200, 0.18]] },
         { id: 'all-clear', name: 'All Clear', pairs: [[523, 0.18], [659, 0.18], [784, 0.35]] }
     ];
-    let pttKeyCode = "Space", pttKeyAccelerator = "Space", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
+    let pttKeyCode = "Semicolon", pttKeyAccelerator = ";", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
     let pointerPttId = null;
     let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
@@ -280,10 +279,9 @@
         txPacketGain = txPacketGain * (1 - smoothing) + targetGain * smoothing;
 
         const output = new Float32Array(length);
-        const gateMix = rms < TX_GATE_FLOOR ? 0.45 : 1;
+        const gateMix = rms < TX_GATE_FLOOR ? 0.75 : 1;
         for (let i = 0; i < length; i++) {
-            const gatedSample = Math.abs(samples[i]) < TX_GATE_SAMPLE_FLOOR ? samples[i] * 0.35 : samples[i];
-            let value = gatedSample * gateMix * txPacketGain;
+            let value = samples[i] * gateMix * txPacketGain;
             if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.12;
             if (value < -TX_LIMIT) value = -TX_LIMIT + (value + TX_LIMIT) * 0.12;
             output[i] = Math.max(-1, Math.min(1, value));
