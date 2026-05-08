@@ -50,6 +50,8 @@
             <h3 style="margin-top:0">Radio Config</h3>
             <label>Callsign</label>
             <input type="text" id="callsign" value="" placeholder="Enter callsign" required>
+            <label>Roblox Username</label>
+            <input type="text" id="robloxUsername" value="" placeholder="Optional">
             <label>Microphone</label>
             <select id="micInput"></select>
             <label>PTT Keybind</label>
@@ -99,6 +101,8 @@
     const MAX_INT16 = 0x7FFF;
     const TX_TARGET_RMS = 0.16;
     const TX_NOISE_FLOOR = 0.004;
+    const TX_GATE_FLOOR = 0.014;
+    const TX_GATE_SAMPLE_FLOOR = 0.01;
     const TX_MIN_GAIN = 0.35;
     const TX_MAX_GAIN = 10.0;
     const TX_LIMIT = 0.82;
@@ -265,6 +269,10 @@
         }
 
         const rms = length ? Math.sqrt(sumSquares / length) : 0;
+        if (rms < TX_NOISE_FLOOR) {
+            return new Float32Array(length);
+        }
+
         const targetGain = rms > TX_NOISE_FLOOR
             ? Math.min(TX_MAX_GAIN, Math.max(TX_MIN_GAIN, TX_TARGET_RMS / rms))
             : 1;
@@ -272,8 +280,10 @@
         txPacketGain = txPacketGain * (1 - smoothing) + targetGain * smoothing;
 
         const output = new Float32Array(length);
+        const gateMix = rms < TX_GATE_FLOOR ? 0.45 : 1;
         for (let i = 0; i < length; i++) {
-            let value = samples[i] * txPacketGain;
+            const gatedSample = Math.abs(samples[i]) < TX_GATE_SAMPLE_FLOOR ? samples[i] * 0.35 : samples[i];
+            let value = gatedSample * gateMix * txPacketGain;
             if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.12;
             if (value < -TX_LIMIT) value = -TX_LIMIT + (value + TX_LIMIT) * 0.12;
             output[i] = Math.max(-1, Math.min(1, value));
@@ -507,7 +517,7 @@
         micStream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 deviceId: selectedDevice ? { exact: selectedDevice } : undefined,
-                echoCancellation: false,
+                echoCancellation: true,
                 noiseSuppression: true,
                 autoGainControl: false,
                 sampleRate: audioCtx.sampleRate
@@ -718,8 +728,10 @@
         }
 
         callsignInput.value = requestedCallsign;
+        const robloxInput = document.getElementById('robloxUsername');
+        const requestedRobloxUsername = robloxInput.value.trim();
 
-        socket.emit('update-status', { callsign: requestedCallsign, activeChannel }, (response) => {
+        socket.emit('update-status', { callsign: requestedCallsign, robloxUsername: requestedRobloxUsername, activeChannel }, (response) => {
             if (!response || !response.ok) {
                 if (response && response.reason === 'callsign-taken') {
                     callsignInput.value = lastAcceptedCallsign;
@@ -731,6 +743,9 @@
             lastAcceptedCallsign = response.callsign;
             if (callsignInput.value !== response.callsign) {
                 callsignInput.value = response.callsign;
+            }
+            if (response.robloxUsername && robloxInput.value !== response.robloxUsername) {
+                robloxInput.value = response.robloxUsername;
             }
             refreshConnectionStatus();
         });
@@ -803,7 +818,10 @@
             const list = document.querySelector(`[data-channel-units="${channel.id}"]`);
             if (!list) return;
             list.innerHTML = unitsByChannel[channel.id]
-                .map(u => `<div class="unit-tag ${u.transmitting ? 'speaking' : ''}">${escapeHtml(u.callsign)}</div>`)
+                .map(u => {
+                    const roblox = u.robloxUsername ? ` <span style="color:#8b949e;">(${escapeHtml(u.robloxUsername)})</span>` : '';
+                    return `<div class="unit-tag ${u.transmitting ? 'speaking' : ''}">${escapeHtml(u.callsign)}${roblox}</div>`;
+                })
                 .join('') || "No units connected";
         });
     }
@@ -932,6 +950,7 @@
         devs.filter(d => d.kind === 'audioinput').forEach(d => sel.innerHTML += `<option value="${d.deviceId}">${d.label || 'Mic'}</option>`);
     });
     document.getElementById('callsign').onchange = syncWithServer;
+    document.getElementById('robloxUsername').onchange = syncWithServer;
     document.getElementById('toneUnlockBtn').addEventListener('click', unlockToneBoard);
     document.getElementById('toneCode').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') unlockToneBoard();

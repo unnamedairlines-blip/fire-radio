@@ -12,6 +12,7 @@ const channelTransmitters = {};
 const callsignOwners = {};
 const monitorChannels = {};
 const TONE_BOARD_CODE = process.env.TONE_BOARD_CODE || '2468';
+const robloxUserCache = new Map();
 
 function releaseCallsign(socketId) {
     const unit = unitRegistry[socketId];
@@ -32,6 +33,33 @@ function releaseTransmitter(socketId) {
     unit.transmitting = false;
 }
 
+async function resolveRobloxUsername(username) {
+    const requestedUsername = String(username || '').trim();
+    if (!requestedUsername) return '';
+
+    const cacheKey = requestedUsername.toLowerCase();
+    if (robloxUserCache.has(cacheKey)) return robloxUserCache.get(cacheKey);
+
+    try {
+        const response = await fetch('https://users.roblox.com/v1/usernames/users', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                usernames: [requestedUsername],
+                excludeBannedUsers: false
+            })
+        });
+        const result = await response.json();
+        const user = result && result.data && result.data[0];
+        const resolvedUsername = user && user.name ? user.name : requestedUsername;
+        robloxUserCache.set(cacheKey, resolvedUsername);
+        return resolvedUsername;
+    } catch (err) {
+        console.warn('Unable to resolve Roblox username', err);
+        return requestedUsername;
+    }
+}
+
 function releaseMonitor(socket) {
     const monitoredChannel = monitorChannels[socket.id];
     if (!monitoredChannel) return;
@@ -44,10 +72,11 @@ function releaseMonitor(socket) {
 }
 
 io.on('connection', (socket) => {
-    socket.on('update-status', (status, ack) => {
+    socket.on('update-status', async (status, ack) => {
         const existing = unitRegistry[socket.id] || {};
         const callsign = String(status.callsign || '').trim().toUpperCase();
         const activeChannel = status.activeChannel ? String(status.activeChannel) : null;
+        const robloxUsername = await resolveRobloxUsername(status.robloxUsername);
 
         if (!callsign) {
             releaseCallsign(socket.id);
@@ -84,11 +113,12 @@ io.on('connection', (socket) => {
         callsignOwners[callsign] = socket.id;
         unitRegistry[socket.id] = {
             callsign,
+            robloxUsername,
             activeChannel,
             transmitting: existing.activeChannel === activeChannel ? existing.transmitting || false : false
         };
         io.emit('unit-list-update', unitRegistry);
-        if (ack) ack({ ok: true, callsign });
+        if (ack) ack({ ok: true, callsign, robloxUsername });
     });
 
     socket.on('tx-status', (status, ack) => {
