@@ -420,16 +420,30 @@
         }
         const rms = samples.length ? Math.sqrt(sumSquares / samples.length) : 0;
 
+        // Update adaptive target based on input history for this callsign
+        if (!rxInputHistory[callsign]) rxInputHistory[callsign] = [];
+        if (rms > RX_NOISE_FLOOR) {
+            rxInputHistory[callsign].push(rms);
+            if (rxInputHistory[callsign].length > ADAPTIVE_WINDOW) {
+                rxInputHistory[callsign].shift();
+            }
+            if (rxInputHistory[callsign].length >= 5) {
+                const avgInput = rxInputHistory[callsign].reduce((a, b) => a + b) / rxInputHistory[callsign].length;
+                const targetAdjustment = Math.min(ADAPTIVE_RANGE, Math.max(-ADAPTIVE_RANGE, (avgInput - RX_TARGET_RMS) / RX_TARGET_RMS));
+                rxAdaptiveTarget = RX_TARGET_RMS * (1 + targetAdjustment);
+            }
+        }
+
         // Calculate target gain with aggressive compression for radio sound
         let targetGain = rms > RX_NOISE_FLOOR
-            ? Math.min(RX_MAX_GAIN, Math.max(RX_MIN_GAIN, RX_TARGET_RMS / rms))
+            ? Math.min(RX_MAX_GAIN, Math.max(RX_MIN_GAIN, rxAdaptiveTarget / rms))
             : 1;
 
         // Apply heavy compression for radio-like dynamics
-        if (rms > RX_TARGET_RMS * 1.1) {
-            const over = rms / RX_TARGET_RMS;
+        if (rms > rxAdaptiveTarget * 1.1) {
+            const over = rms / rxAdaptiveTarget;
             const compressed = 1 + (over - 1) / RX_COMPRESSION_RATIO;
-            targetGain *= RX_TARGET_RMS / (rms / compressed);
+            targetGain *= rxAdaptiveTarget / (rms / compressed);
         }
 
         const previousGain = rxGainByCallsign.get(callsign) || 1;
@@ -460,8 +474,8 @@
 
             // Apply compression envelope
             const absValue = Math.abs(value);
-            if (absValue > RX_TARGET_RMS * 0.7) {
-                compressorEnv = Math.min(compressorEnv, RX_TARGET_RMS / absValue);
+            if (absValue > rxAdaptiveTarget * 0.7) {
+                compressorEnv = Math.min(compressorEnv, rxAdaptiveTarget / absValue);
             }
             compressorEnv = Math.min(1, compressorEnv + 1/(sampleRate * RX_RELEASE_TIME));
 
