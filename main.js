@@ -21,7 +21,7 @@ function createWindow() {
   const windowOptions = {
     width: 1100,
     height: 850,
-    title: "Nexus Fire Radio",
+    title: "Nexus Radio",
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false

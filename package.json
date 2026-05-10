@@ -1,5 +1,6 @@
 {
-  "name": "fire-radio-desktop",
+  "name": "nexus-radio-desktop",
+  "productName": "Nexus Radio",
   "version": "1.0.0",
   "description": "Desktop Radio Broadcasting Console",
   "main": "main.js",
@@ -18,12 +19,15 @@
   },
   "build": {
     "appId": "com.fireradio.app",
+    "artifactName": "${productName}.${ext}",
     "files": [
       "**/*",
       "!dist*/**"
     ],
     "win": {
       "target": "portable",
+      "icon": "public/app-icon-256.png",
+      "executableName": "Nexus Radio",
       "signAndEditExecutable": false
     }
   }
