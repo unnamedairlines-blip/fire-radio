@@ -105,8 +105,8 @@
     const TX_GATE_FLOOR = 0.006;
     const TX_MIN_GAIN = 0.4;
     const TX_MAX_GAIN = 12.0;
-    const TX_LIMIT = 0.75;
-    const TX_COMPRESSION_RATIO = 4.0;
+    const TX_LIMIT = 0.65;
+    const TX_COMPRESSION_RATIO = 7.5;
     const TX_ATTACK_TIME = 0.002;
     const TX_RELEASE_TIME = 0.15;
     const TX_DEESS_FREQ = 5500;
@@ -137,7 +137,7 @@
     let txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
     let pointerPttId = null;
-    let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
+    let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, backgroundStaticGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
     let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
     let micMeterLevel = 0, lastMeterUpdate = 0;
@@ -182,6 +182,20 @@
         osc.start(t); osc.stop(t + dur + 0.02);
     }
 
+    function playMicClick(type = "down") {
+        if (!audioCtx) return;
+        const dur = type === "down" ? 0.015 : 0.02;
+        const freq = type === "down" ? 800 : 600;
+        const g = audioCtx.createGain();
+        const osc = audioCtx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        g.gain.setValueAtTime(0.04, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        osc.connect(g); g.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + dur);
+    }
+
     function playNoiseBurst(start, dur, volume = 0.012) {
         if (!audioCtx) return;
 
@@ -200,7 +214,7 @@
 
         filter.type = "bandpass";
         filter.frequency.value = 1800;
-        filter.Q.value = 1.4;
+        filter.Q.value = 4.5; // High Q for that hollow "radio" sound
         g.gain.setValueAtTime(volume, t);
         g.gain.linearRampToValueAtTime(0.001, t + dur);
 
@@ -702,6 +716,8 @@
         }
         if (monitorGain) monitorGain.disconnect();
         if (lowpassNode) lowpassNode.disconnect();
+        if (midBoostNode) midBoostNode.disconnect();
+        if (distortionNode) distortionNode.disconnect();
         if (highpassNode) highpassNode.disconnect();
         if (sourceNode) sourceNode.disconnect();
         if (micStream) micStream.getTracks().forEach(t => t.stop());
@@ -709,6 +725,8 @@
         sourceNode = null;
         highpassNode = null;
         lowpassNode = null;
+        midBoostNode = null;
+        distortionNode = null;
         workletNode = null;
         monitorGain = null;
         micStream = null;
