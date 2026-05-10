@@ -96,22 +96,33 @@
     const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
     const socket = io("https://fire-radio.onrender.com");
     const PACKET_SIZE = 1024;
-    const JITTER_TARGET = 0.12;
-    const JITTER_MIN = 0.03;
-    const JITTER_MAX = 0.35;
+    const JITTER_TARGET = 0.08;
+    const JITTER_MIN = 0.02;
+    const JITTER_MAX = 0.25;
     const MAX_INT16 = 0x7FFF;
-    const TX_TARGET_RMS = 0.16;
-    const TX_NOISE_FLOOR = 0.004;
-    const TX_GATE_FLOOR = 0.008;
-    const TX_MIN_GAIN = 0.35;
-    const TX_MAX_GAIN = 10.0;
-    const TX_LIMIT = 0.82;
-    const RX_TARGET_RMS = 0.18;
-    const RX_NOISE_FLOOR = 0.003;
-    const RX_MIN_GAIN = 0.35;
-    const RX_MAX_GAIN = 12.0;
-    const RX_LIMIT = 0.82;
-    const RX_OUTPUT_GAIN = 1.15;
+    const TX_TARGET_RMS = 0.14;
+    const TX_NOISE_FLOOR = 0.003;
+    const TX_GATE_FLOOR = 0.006;
+    const TX_MIN_GAIN = 0.4;
+    const TX_MAX_GAIN = 12.0;
+    const TX_LIMIT = 0.75;
+    const TX_COMPRESSION_RATIO = 4.0;
+    const TX_ATTACK_TIME = 0.002;
+    const TX_RELEASE_TIME = 0.15;
+    const TX_DEESS_FREQ = 5500;
+    const TX_DEESS_RATIO = 3.0;
+    const RX_TARGET_RMS = 0.16;
+    const RX_NOISE_FLOOR = 0.002;
+    const RX_MIN_GAIN = 0.4;
+    const RX_MAX_GAIN = 14.0;
+    const RX_LIMIT = 0.75;
+    const RX_OUTPUT_GAIN = 1.25;
+    const RX_COMPRESSION_RATIO = 6.0;
+    const RX_ATTACK_TIME = 0.001;
+    const RX_RELEASE_TIME = 0.08;
+    const RX_DEESS_FREQ = 5000;
+    const RX_DEESS_RATIO = 4.0;
+    const PACKET_BUFFER_SIZE = 8;
     const CHANNELS = [
         { id: 'fire-rto', name: 'Fire RTO' },
         { id: 'operations-1', name: 'Operations 1' },
@@ -123,7 +134,7 @@
         { id: 'evac', name: 'Evac', pairs: [[1200, 0.18], [0, 0.08], [1200, 0.18], [0, 0.08], [1200, 0.18]] },
         { id: 'all-clear', name: 'All Clear', pairs: [[523, 0.18], [659, 0.18], [784, 0.35]] }
     ];
-    let pttKeyCode = "KeyX", pttKeyAccelerator = "X", isBinding = false, isTalking = false, txHeld = false, active = false, activeChannel = null;
+    let txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
     let pointerPttId = null;
     let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
@@ -137,6 +148,10 @@
     let txPacketGain = 1;
     let toneBoardCode = '';
     let toneSequence = 0;
+    let txCompressorGain = 1, txDeesserGain = 1;
+    let rxCompressorGain = 1, rxDeesserGain = 1;
+    let rxPacketBuffer = new Map(); // Buffer for reordering packets
+    let rxNextSequence = new Map(); // Expected sequence numbers per callsign
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -288,34 +303,75 @@
 
     function resetTxBuffer() {
         txOffset = 0;
+        txCompressorGain = 1;
+        txDeesserGain = 1;
     }
 
     function normalizeTransmitAudio(samples, length) {
         let sumSquares = 0;
-
         for (let i = 0; i < length; i++) {
             sumSquares += samples[i] * samples[i];
         }
-
         const rms = length ? Math.sqrt(sumSquares / length) : 0;
+
         if (rms < TX_NOISE_FLOOR) {
             return new Float32Array(length);
         }
 
-        const targetGain = rms > TX_NOISE_FLOOR
-            ? Math.min(TX_MAX_GAIN, Math.max(TX_MIN_GAIN, TX_TARGET_RMS / rms))
-            : 1;
-        const smoothing = targetGain < txPacketGain ? 0.75 : 0.55;
+        // Calculate target gain with compression
+        let targetGain = Math.min(TX_MAX_GAIN, Math.max(TX_MIN_GAIN, TX_TARGET_RMS / rms));
+
+        // Apply compression for radio-like punch
+        if (rms > TX_TARGET_RMS * 1.2) {
+            const over = rms / TX_TARGET_RMS;
+            const compressed = 1 + (over - 1) / TX_COMPRESSION_RATIO;
+            targetGain *= TX_TARGET_RMS / (rms / compressed);
+        }
+
+        // Smooth gain changes
+        const smoothing = targetGain < txPacketGain ? 0.8 : 0.6;
         txPacketGain = txPacketGain * (1 - smoothing) + targetGain * smoothing;
 
+        // Process samples with compression envelope and de-essing
         const output = new Float32Array(length);
-        const gateMix = rms < TX_GATE_FLOOR ? 0.75 : 1;
+        let compressorEnv = txCompressorGain;
+        let deesserEnv = txDeesserGain;
+
         for (let i = 0; i < length; i++) {
-            let value = samples[i] * gateMix * txPacketGain;
-            if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.12;
-            if (value < -TX_LIMIT) value = -TX_LIMIT + (value + TX_LIMIT) * 0.12;
+            let value = samples[i];
+
+            // Apply high-frequency de-essing
+            const sampleRate = audioCtx.sampleRate;
+            const deessAlpha = 2 * Math.PI * TX_DEESS_FREQ / sampleRate;
+            const deessCoeff = Math.exp(-deessAlpha);
+            const highFreq = value - deesserEnv * deessCoeff;
+            const deessAmount = Math.max(0, highFreq) * 0.3;
+            if (deessAmount > 0.01) {
+                deesserEnv = deesserEnv * (1 - 1/TX_DEESS_RATIO) + deessAmount * (1/TX_DEESS_RATIO);
+            } else {
+                deesserEnv *= 0.998;
+            }
+            value -= deesserEnv * 0.15;
+
+            // Apply compression envelope
+            const absValue = Math.abs(value);
+            if (absValue > TX_TARGET_RMS * 0.8) {
+                compressorEnv = Math.min(compressorEnv, TX_TARGET_RMS / absValue);
+            }
+            compressorEnv = Math.min(1, compressorEnv + 1/(sampleRate * TX_RELEASE_TIME));
+
+            // Apply gain and limiting
+            value = value * txPacketGain * compressorEnv * 1.1; // Boost for radio punch
+
+            // Soft limiting
+            if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.08;
+            if (value < -TX_LIMIT) value = -TX_LIMIT + (value + TX_LIMIT) * 0.08;
+
             output[i] = Math.max(-1, Math.min(1, value));
         }
+
+        txCompressorGain = compressorEnv;
+        txDeesserGain = deesserEnv;
 
         return output;
     }
@@ -359,29 +415,69 @@
 
     function normalizePlaybackAudio(samples, callsign) {
         let sumSquares = 0;
-
         for (let i = 0; i < samples.length; i++) {
             sumSquares += samples[i] * samples[i];
         }
-
         const rms = samples.length ? Math.sqrt(sumSquares / samples.length) : 0;
-        const targetGain = rms > RX_NOISE_FLOOR
+
+        // Calculate target gain with aggressive compression for radio sound
+        let targetGain = rms > RX_NOISE_FLOOR
             ? Math.min(RX_MAX_GAIN, Math.max(RX_MIN_GAIN, RX_TARGET_RMS / rms))
             : 1;
+
+        // Apply heavy compression for radio-like dynamics
+        if (rms > RX_TARGET_RMS * 1.1) {
+            const over = rms / RX_TARGET_RMS;
+            const compressed = 1 + (over - 1) / RX_COMPRESSION_RATIO;
+            targetGain *= RX_TARGET_RMS / (rms / compressed);
+        }
+
         const previousGain = rxGainByCallsign.get(callsign) || 1;
-        const smoothing = targetGain < previousGain ? 0.85 : 0.65;
+        const smoothing = targetGain < previousGain ? 0.9 : 0.7;
         const playbackGain = previousGain * (1 - smoothing) + targetGain * smoothing;
         rxGainByCallsign.set(callsign, playbackGain);
 
+        // Process samples with compression and de-essing
         const output = new Float32Array(samples.length);
-        const finalGain = playbackGain * RX_OUTPUT_GAIN;
+        let compressorEnv = rxCompressorGain;
+        let deesserEnv = rxDeesserGain;
+
         for (let i = 0; i < samples.length; i++) {
-            let value = samples[i] * finalGain;
-            if (value > RX_LIMIT) value = RX_LIMIT + (value - RX_LIMIT) * 0.12;
-            if (value < -RX_LIMIT) value = -RX_LIMIT + (value + RX_LIMIT) * 0.12;
+            let value = samples[i];
+
+            // Apply high-frequency de-essing
+            const sampleRate = audioCtx.sampleRate;
+            const deessAlpha = 2 * Math.PI * RX_DEESS_FREQ / sampleRate;
+            const deessCoeff = Math.exp(-deessAlpha);
+            const highFreq = value - deesserEnv * deessCoeff;
+            const deessAmount = Math.max(0, highFreq) * 0.25;
+            if (deessAmount > 0.005) {
+                deesserEnv = deesserEnv * (1 - 1/RX_DEESS_RATIO) + deessAmount * (1/RX_DEESS_RATIO);
+            } else {
+                deesserEnv *= 0.999;
+            }
+            value -= deesserEnv * 0.12;
+
+            // Apply compression envelope
+            const absValue = Math.abs(value);
+            if (absValue > RX_TARGET_RMS * 0.7) {
+                compressorEnv = Math.min(compressorEnv, RX_TARGET_RMS / absValue);
+            }
+            compressorEnv = Math.min(1, compressorEnv + 1/(sampleRate * RX_RELEASE_TIME));
+
+            // Apply gain and limiting
+            value = value * playbackGain * compressorEnv * RX_OUTPUT_GAIN;
+
+            // Soft limiting
+            if (value > RX_LIMIT) value = RX_LIMIT + (value - RX_LIMIT) * 0.06;
+            if (value < -RX_LIMIT) value = -RX_LIMIT + (value + RX_LIMIT) * 0.06;
+
             value = Math.max(-1, Math.min(1, value));
             output[i] = value;
         }
+
+        rxCompressorGain = compressorEnv;
+        rxDeesserGain = deesserEnv;
 
         return output;
     }
@@ -681,6 +777,10 @@
                 socket.emit('monitor-channel', null);
             }
             nextStartTime = 0;
+            rxPacketBuffer.clear();
+            rxNextSequence.clear();
+            rxCompressorGain = 1;
+            rxDeesserGain = 1;
 
             if (active) {
                 await startMicPipeline();
@@ -720,6 +820,10 @@
             await ensureAudioContext();
             monitorChannel = monitorChannel === channelId ? null : channelId;
             nextStartTime = 0;
+            rxPacketBuffer.clear();
+            rxNextSequence.clear();
+            rxCompressorGain = 1;
+            rxDeesserGain = 1;
             socket.emit('monitor-channel', monitorChannel, (response) => {
                 if (!response || !response.ok) {
                     monitorChannel = null;
@@ -888,6 +992,8 @@
             isTalking = true;
             resetTxBuffer();
             txPacketGain = 1;
+            txCompressorGain = 1;
+            txDeesserGain = 1;
             lastMicPeak = 0;
             document.getElementById('pttBtn').classList.add('active');
             playRadioBeep("start");
@@ -917,7 +1023,7 @@
         setAudioStatus(`Idle | TX ${txPackets} | RX ${rxPackets}`);
     }
 
-    // --- RECEIVE (FORCED SYNC) ---
+    // --- RECEIVE (FORCED SYNC WITH BUFFERING) ---
     function packetToInt16Array(data) {
         if (data instanceof Int16Array) return data;
         if (data instanceof ArrayBuffer) return new Int16Array(data);
@@ -927,27 +1033,52 @@
         return null;
     }
 
-    socket.on('audio-out', (p) => {
-        const canReceiveChannel = p.channel === activeChannel || p.channel === monitorChannel;
-        if (p.call === document.getElementById('callsign').value || !audioCtx || !canReceiveChannel) return;
-        rxPackets++;
-        
-        const int16 = packetToInt16Array(p.data);
+    function processBufferedPackets(callsign) {
+        const buffer = rxPacketBuffer.get(callsign);
+        if (!buffer || buffer.length === 0) return;
+
+        const expectedSeq = rxNextSequence.get(callsign) || 0;
+        const readyPackets = [];
+
+        // Find packets that can be played in order
+        while (buffer.length > 0 && buffer[0].seq === expectedSeq) {
+            readyPackets.push(buffer.shift());
+            rxNextSequence.set(callsign, expectedSeq + 1);
+        }
+
+        // Play ready packets
+        readyPackets.forEach(packet => {
+            playAudioPacket(packet);
+        });
+
+        // Clean up old packets (more than 500ms late)
+        const now = Date.now();
+        const cutoff = now - 500;
+        const filtered = buffer.filter(p => p.timestamp > cutoff);
+        if (filtered.length !== buffer.length) {
+            rxPacketBuffer.set(callsign, filtered);
+        }
+    }
+
+    function playAudioPacket(packet) {
+        const int16 = packetToInt16Array(packet.data);
         if (!int16 || !int16.length) return;
+
         let f32 = new Float32Array(int16.length);
-        for(let i=0; i<int16.length; i++) f32[i] = int16[i] / MAX_INT16;
-        f32 = resampleLinear(f32, p.sampleRate, audioCtx.sampleRate);
-        f32 = normalizePlaybackAudio(f32, p.call || 'UNKNOWN');
-        
+        for(let i = 0; i < int16.length; i++) f32[i] = int16[i] / MAX_INT16;
+        f32 = resampleLinear(f32, packet.sampleRate, audioCtx.sampleRate);
+        f32 = normalizePlaybackAudio(f32, packet.call || 'UNKNOWN');
+
         const buf = audioCtx.createBuffer(1, f32.length, audioCtx.sampleRate);
         buf.getChannelData(0).set(f32);
-        
+
         const src = audioCtx.createBufferSource();
         src.buffer = buf;
         src.connect(audioCtx.destination);
-        
+
         const now = audioCtx.currentTime;
 
+        // Improved jitter buffer management
         if (nextStartTime < now + JITTER_MIN || nextStartTime > now + JITTER_MAX) {
             nextStartTime = now + JITTER_TARGET;
         }
@@ -955,6 +1086,77 @@
         src.start(nextStartTime);
         nextStartTime += buf.duration;
         setAudioStatus(`TX ${txPackets} | RX ${rxPackets} | Buffer ${Math.round((nextStartTime - now) * 1000)}ms`);
+    }
+
+    function insertSilenceForMissingPacket(callsign, duration) {
+        if (!audioCtx) return;
+
+        const sampleCount = Math.floor(audioCtx.sampleRate * duration * 0.8); // 80% of packet duration
+        if (sampleCount <= 0) return;
+
+        const silence = new Float32Array(sampleCount);
+        const buf = audioCtx.createBuffer(1, sampleCount, audioCtx.sampleRate);
+        buf.getChannelData(0).set(silence);
+
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+        if (nextStartTime < now + JITTER_MIN || nextStartTime > now + JITTER_MAX) {
+            nextStartTime = now + JITTER_TARGET;
+        }
+
+        src.start(nextStartTime);
+        nextStartTime += buf.duration;
+    }
+
+    socket.on('audio-out', (p) => {
+        const canReceiveChannel = p.channel === activeChannel || p.channel === monitorChannel;
+        if (p.call === document.getElementById('callsign').value || !audioCtx || !canReceiveChannel) return;
+
+        rxPackets++;
+        const callsign = p.call || 'UNKNOWN';
+        const seq = p.seq || 0;
+        const expectedSeq = rxNextSequence.get(callsign) || 0;
+
+        // Add packet to buffer with timestamp
+        const packet = { ...p, timestamp: Date.now() };
+        if (!rxPacketBuffer.has(callsign)) {
+            rxPacketBuffer.set(callsign, []);
+        }
+        const buffer = rxPacketBuffer.get(callsign);
+
+        // Insert in sequence order
+        let insertIndex = buffer.findIndex(existing => existing.seq > seq);
+        if (insertIndex === -1) {
+            buffer.push(packet);
+        } else {
+            buffer.splice(insertIndex, 0, packet);
+        }
+
+        // Limit buffer size
+        if (buffer.length > PACKET_BUFFER_SIZE) {
+            buffer.shift(); // Drop oldest packet
+        }
+
+        // If this is the next expected packet, process the buffer
+        if (seq === expectedSeq) {
+            processBufferedPackets(callsign);
+        } else if (seq < expectedSeq) {
+            // Duplicate or late packet, ignore
+            return;
+        } else {
+            // Future packet, check if we need to insert silence for missing packets
+            const gap = seq - expectedSeq;
+            if (gap <= 3) { // Only fill small gaps
+                for (let i = 0; i < gap; i++) {
+                    insertSilenceForMissingPacket(callsign, PACKET_SIZE / audioCtx.sampleRate);
+                    rxNextSequence.set(callsign, expectedSeq + i + 1);
+                }
+                processBufferedPackets(callsign);
+            }
+        }
     });
 
     socket.on('connect', () => {
