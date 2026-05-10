@@ -105,8 +105,8 @@
     const TX_GATE_FLOOR = 0.006;
     const TX_MIN_GAIN = 0.4;
     const TX_MAX_GAIN = 12.0;
-    const TX_LIMIT = 0.75;
-    const TX_COMPRESSION_RATIO = 4.0;
+    const TX_LIMIT = 0.65;
+    const TX_COMPRESSION_RATIO = 7.5;
     const TX_ATTACK_TIME = 0.002;
     const TX_RELEASE_TIME = 0.15;
     const TX_DEESS_FREQ = 5500;
@@ -137,10 +137,11 @@
     let txHeld = false, active = false, activeChannel = null;
     let isRequestingTx = false;
     let pointerPttId = null;
-    let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, nextStartTime = 0;
+    let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, workletNode, monitorGain, backgroundStaticGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
     let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
     let micMeterLevel = 0, lastMeterUpdate = 0;
+    let isReceiving = false, rxTimeout = null;
     const rxGainByCallsign = new Map();
     let lastAcceptedCallsign = '';
     let socketConnected = false;
@@ -180,6 +181,20 @@
         g.gain.linearRampToValueAtTime(0.001, t + dur);
         osc.connect(g); g.connect(audioCtx.destination);
         osc.start(t); osc.stop(t + dur + 0.02);
+    }
+
+    function playMicClick(type = "down") {
+        if (!audioCtx) return;
+        const dur = type === "down" ? 0.015 : 0.02;
+        const freq = type === "down" ? 800 : 600;
+        const g = audioCtx.createGain();
+        const osc = audioCtx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        g.gain.setValueAtTime(0.04, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        osc.connect(g); g.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + dur);
     }
 
     function playNoiseBurst(start, dur, volume = 0.012) {
@@ -232,6 +247,35 @@
         });
     }
 
+    function initBackgroundStatic() {
+        if (!audioCtx || backgroundStaticGain) return;
+        
+        const bufferSize = audioCtx.sampleRate * 2;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = (Math.random() * 2 - 1) * 0.0025; // Constant very low hiss
+        }
+
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+        noise.loop = true;
+        
+        backgroundStaticGain = audioCtx.createGain();
+        backgroundStaticGain.gain.value = 0; // Starts muted
+        
+        noise.connect(backgroundStaticGain);
+        backgroundStaticGain.connect(audioCtx.destination);
+        noise.start();
+    }
+
+    function updateStaticLevel(isReceivingAudio) {
+        if (!backgroundStaticGain) return;
+        // Duck the static when receiving clear voice, boost it when idle
+        const target = active ? (isReceivingAudio ? 0.4 : 1.0) : 0;
+        backgroundStaticGain.gain.setTargetAtTime(target, audioCtx.currentTime, 0.1);
+    }
+
     function playRadioBeep(type) {
         if (!audioCtx) return;
 
@@ -247,7 +291,7 @@
                     [950, 1450, 0, 0.04, 0.017],
                     [1850, 1250, 0.045, 0.052, 0.015]
                 ]);
-                playNoiseBurst(0.092, 0.026, 0.008);
+                playNoiseBurst(0.092, 0.065, 0.012);
             }
         } catch (err) {
             console.warn('Unable to play radio beep', err);
@@ -647,6 +691,7 @@
         if (!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
             await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type:'application/javascript'})));
+            initBackgroundStatic();
         }
         await audioCtx.resume();
     }
@@ -670,16 +715,17 @@
 
         highpassNode = audioCtx.createBiquadFilter();
         highpassNode.type = "highpass";
-        highpassNode.frequency.value = 80;
-        highpassNode.Q.value = 0.7;
+        highpassNode.frequency.value = 350;
+        highpassNode.Q.value = 1.1;
 
         lowpassNode = audioCtx.createBiquadFilter();
         lowpassNode.type = "lowpass";
-        lowpassNode.frequency.value = 6500;
-        lowpassNode.Q.value = 0.7;
+        lowpassNode.frequency.value = 3000;
+        lowpassNode.Q.value = 1.1;
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
         monitorGain = audioCtx.createGain();
+        updateStaticLevel(false);
         monitorGain.gain.value = 0;
 
         workletNode.port.onmessage = (e) => {
@@ -787,6 +833,7 @@
             active = Boolean(nextChannel);
             activeChannel = nextChannel;
             if (monitorChannel && monitorChannel === activeChannel) {
+                updateStaticLevel(false);
                 monitorChannel = null;
                 socket.emit('monitor-channel', null);
             }
@@ -806,6 +853,7 @@
 
             updateUI();
             syncWithServer();
+            updateStaticLevel(false);
         } catch (err) {
             console.error('Unable to connect audio', err);
             active = false;
@@ -840,6 +888,7 @@
             rxDeesserGain = 1;
             socket.emit('monitor-channel', monitorChannel, (response) => {
                 if (!response || !response.ok) {
+                    updateStaticLevel(false);
                     monitorChannel = null;
                     setAudioStatus("Monitor unavailable");
                 }
@@ -848,6 +897,7 @@
             });
             updateUI();
             refreshConnectionStatus();
+            updateStaticLevel(false);
         } catch (err) {
             console.error('Unable to start monitor audio', err);
             monitorChannel = null;
@@ -986,6 +1036,7 @@
         isRequestingTx = true;
 
         try {
+            playMicClick("down");
             await ensureAudioContext();
             await startMicPipeline();
             const txGrant = await requestTxStart();
@@ -1029,6 +1080,7 @@
         resetTxBuffer();
         isTalking = false;
         socket.emit('tx-status', { transmitting: false });
+        playMicClick("up");
         if (playTone) playRadioBeep("stop");
         document.getElementById('pttBtn').classList.remove('active');
         if (workletNode) {
@@ -1129,6 +1181,16 @@
         const canReceiveChannel = p.channel === activeChannel || p.channel === monitorChannel;
         if (p.call === document.getElementById('callsign').value || !audioCtx || !canReceiveChannel) return;
 
+        if (!isReceiving) {
+            isReceiving = true;
+            updateStaticLevel(true);
+        }
+        clearTimeout(rxTimeout);
+        rxTimeout = setTimeout(() => {
+            isReceiving = false;
+            updateStaticLevel(false);
+        }, 500);
+
         rxPackets++;
         const callsign = p.call || 'UNKNOWN';
         const seq = p.seq || 0;
@@ -1188,6 +1250,10 @@
     socket.on('tx-status', (status) => {
         if (status.activeChannel !== activeChannel && status.activeChannel !== monitorChannel) return;
         if (status.senderId && status.senderId === socket.id) return;
+        
+        if (!status.transmitting) {
+            playNoiseBurst(0, 0.08, 0.015); // The squelch "ker-chunk"
+        }
         if (audioCtx) playRadioBeep(status.transmitting ? "start" : "stop");
     });
     socket.on('callsign-rejected', (info) => {
