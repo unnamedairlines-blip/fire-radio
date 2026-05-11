@@ -107,7 +107,6 @@
     const TX_MAX_GAIN = 12.0;
     const TX_LIMIT = 0.65;
     const TX_COMPRESSION_RATIO = 7.5;
-    const TX_DISTORTION = 2.5;
     const TX_ATTACK_TIME = 0.002;
     const TX_RELEASE_TIME = 0.15;
     const TX_DEESS_FREQ = 5500;
@@ -123,6 +122,8 @@
     const RX_RELEASE_TIME = 0.08;
     const RX_DEESS_FREQ = 5000;
     const RX_DEESS_RATIO = 4.0;
+    const ADAPTIVE_WINDOW = 15;
+    const ADAPTIVE_RANGE = 0.4;
     const PACKET_BUFFER_SIZE = 8;
     const CHANNELS = [
         { id: 'fire-rto', name: 'Fire RTO' },
@@ -144,6 +145,8 @@
     let micMeterLevel = 0, lastMeterUpdate = 0;
     let isReceiving = false, rxTimeout = null;
     const rxGainByCallsign = new Map();
+    const rxInputHistory = {};
+    let rxAdaptiveTarget = RX_TARGET_RMS;
     let lastAcceptedCallsign = '';
     let socketConnected = false;
     let monitorChannel = null;
@@ -168,18 +171,6 @@
         registerProcessor('radio-processor', P);
     `;
 
-    function makeDistortionCurve(amount) {
-        const k = amount;
-        const n_samples = 44100;
-        const curve = new Float32Array(n_samples);
-        const deg = Math.PI / 180;
-        for (let i = 0; i < n_samples; ++i) {
-            const x = (i * 2) / n_samples - 1;
-            curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
-        }
-        return curve;
-    }
-
     function playTone(freq, start, dur, volume = 0.035, type = "square") {
         if (!audioCtx) return;
         const osc = audioCtx.createOscillator();
@@ -196,6 +187,24 @@
         osc.start(t); osc.stop(t + dur + 0.02);
     }
 
+    function playMDC1200(start) {
+        if (!audioCtx) return;
+        const t = audioCtx.currentTime + start;
+        const dur = 0.18;
+        const mdcOsc = audioCtx.createOscillator();
+        const mdcG = audioCtx.createGain();
+        mdcOsc.type = "sine";
+        for(let i=0; i<15; i++) {
+            mdcOsc.frequency.setValueAtTime(i%2 === 0 ? 1200 : 1800, t + (i*0.012));
+        }
+        mdcG.gain.setValueAtTime(0, t);
+        mdcG.gain.linearRampToValueAtTime(0.025, t + 0.005);
+        mdcG.gain.setValueAtTime(0.025, t + dur - 0.005);
+        mdcG.gain.linearRampToValueAtTime(0, t + dur);
+        mdcOsc.connect(mdcG); mdcG.connect(audioCtx.destination);
+        mdcOsc.start(t); mdcOsc.stop(t + dur);
+    }
+
     function playMicClick(type = "down") {
         if (!audioCtx) return;
         const dur = type === "down" ? 0.015 : 0.02;
@@ -208,6 +217,17 @@
         g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
         osc.connect(g); g.connect(audioCtx.destination);
         osc.start(); osc.stop(audioCtx.currentTime + dur);
+
+        if (type === "down") {
+            // Low-frequency physical mic "thump"
+            const thump = audioCtx.createOscillator();
+            const tg = audioCtx.createGain();
+            thump.frequency.setValueAtTime(60, audioCtx.currentTime);
+            tg.gain.setValueAtTime(0.12, audioCtx.currentTime);
+            tg.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
+            thump.connect(tg); tg.connect(audioCtx.destination);
+            thump.start(); thump.stop(audioCtx.currentTime + 0.04);
+        }
     }
 
     function playNoiseBurst(start, dur, volume = 0.012) {
@@ -228,7 +248,7 @@
 
         filter.type = "bandpass";
         filter.frequency.value = 1800;
-        filter.Q.value = 1.4;
+        filter.Q.value = 6.0; // High Q for realistic hollow resonance
         g.gain.setValueAtTime(volume, t);
         g.gain.linearRampToValueAtTime(0.001, t + dur);
 
@@ -294,29 +314,17 @@
 
         try {
             if (type === "start") {
-                // Iconic Motorola 3-Pip Talk Permit Tone (TPT)
-                const t = audioCtx.currentTime;
-                [0, 0.04, 0.08].forEach(offset => {
-                    const osc = audioCtx.createOscillator();
-                    const g = audioCtx.createGain();
-                    osc.frequency.setValueAtTime(900, t + offset);
-                    g.gain.setValueAtTime(0, t + offset);
-                    g.gain.linearRampToValueAtTime(0.04, t + offset + 0.005);
-                    g.gain.setValueAtTime(0.04, t + offset + 0.025);
-                    g.gain.linearRampToValueAtTime(0, t + offset + 0.03);
-                    osc.connect(g); g.connect(audioCtx.destination);
-                    osc.start(t + offset); osc.stop(t + offset + 0.035);
-                });
+                playNoiseBurst(0, 0.018, 0.009);
+                playMotorolaControlBurst(0, [
+                    [1700, 2350, 0.012, 0.032, 0.018],
+                    [1350, 950, 0.048, 0.038, 0.016]
+                ]);
             } else {
-                // Squelch Tail (The "Ker-chunk")
-                playNoiseBurst(0, 0.12, 0.025);
-                const thump = audioCtx.createOscillator();
-                const tg = audioCtx.createGain();
-                thump.frequency.setValueAtTime(60, audioCtx.currentTime + 0.1);
-                tg.gain.setValueAtTime(0.18, audioCtx.currentTime + 0.1);
-                tg.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
-                thump.connect(tg); tg.connect(audioCtx.destination);
-                thump.start(audioCtx.currentTime + 0.1); thump.stop(audioCtx.currentTime + 0.2);
+                playMotorolaControlBurst(0, [
+                    [950, 1450, 0, 0.04, 0.017],
+                    [1850, 1250, 0.045, 0.052, 0.015]
+                ]);
+                playNoiseBurst(0.092, 0.065, 0.012);
             }
         } catch (err) {
             console.warn('Unable to play radio beep', err);
