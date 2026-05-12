@@ -5,50 +5,199 @@
     <title>Nexus Radio</title>
     <link rel="icon" href="app-icon.png">
     <style>
-        :root { --bg: #0d1117; --panel: #161b22; --accent: #58a6ff; --red: #f85149; --green: #3fb950; --text: #c9d1d9; }
-        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; }
-        .dashboard { max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
-        .card { background: var(--panel); border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
-        .ptt-btn { width: 100%; padding: 50px 0; font-size: 22px; font-weight: bold; border-radius: 12px; border: none; background: #21262d; color: #484f58; transition: 0.2s; cursor: not-allowed; margin-top: 10px; }
-        .ptt-btn.ready { background: #238636; color: white; cursor: pointer; }
-        .ptt-btn.active { background: var(--red); box-shadow: 0 0 30px rgba(248, 81, 73, 0.5); transform: scale(0.98); }
-        .unit-tag { padding: 8px; border-left: 4px solid var(--green); background: #21262d; margin-bottom: 6px; border-radius: 0 4px 4px 0; font-family: monospace; }
-        .unit-tag.speaking { border-left-color: var(--red); background: rgba(248, 81, 73, 0.14); color: white; box-shadow: inset 0 0 0 1px rgba(248, 81, 73, 0.35); }
-        .unit-tag.speaking::after { content: "TRANSMITTING"; float: right; color: var(--red); font-size: 11px; font-weight: bold; }
+        :root {
+            --bg: #0a0d0f;
+            --panel: #171a1c;
+            --panel-2: #101315;
+            --bezel: #252a2e;
+            --lcd: #95ff8d;
+            --lcd-dim: #4b8150;
+            --accent: #f2a51a;
+            --red: #e43d30;
+            --green: #48cf61;
+            --text: #d8dde0;
+            --muted: #879098;
+        }
+        * { box-sizing: border-box; }
+        body {
+            min-height: 100vh;
+            margin: 0;
+            background:
+                radial-gradient(circle at 50% 0%, rgba(242, 165, 26, 0.08), transparent 32%),
+                linear-gradient(135deg, #07090a 0%, #101315 48%, #07090a 100%);
+            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            padding: 20px;
+        }
+        body.loading .dashboard { filter: blur(2px); pointer-events: none; }
+        .dashboard { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 320px 1fr; gap: 18px; }
+        .card {
+            background: linear-gradient(180deg, #1c2023 0%, #111416 100%);
+            border: 1px solid #343b40;
+            border-radius: 8px;
+            padding: 18px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 50px rgba(0,0,0,0.28);
+        }
+        .radio-head { margin-bottom: 14px; }
+        .brand-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .brand-mark { color: #f4f7f8; font-weight: 800; letter-spacing: 0.08em; font-size: 13px; }
+        .model-mark { color: var(--accent); font-family: Consolas, monospace; font-size: 12px; }
+        .lcd-display {
+            min-height: 78px;
+            background: linear-gradient(180deg, #102512 0%, #071508 100%);
+            border: 2px solid #050806;
+            border-radius: 6px;
+            padding: 12px;
+            color: var(--lcd);
+            font-family: Consolas, 'Courier New', monospace;
+            box-shadow: inset 0 0 18px rgba(149,255,141,0.08), 0 0 0 1px #2d362f;
+        }
+        .lcd-line-main { display: flex; justify-content: space-between; gap: 12px; font-size: 18px; font-weight: 800; }
+        .lcd-line-sub { margin-top: 8px; color: var(--lcd-dim); font-size: 12px; text-transform: uppercase; }
+        .status-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+        .status-pill {
+            min-height: 46px;
+            background: #0c0f10;
+            border: 1px solid #2d3337;
+            border-radius: 6px;
+            padding: 8px;
+            font-family: Consolas, monospace;
+        }
+        .status-pill span { display: block; color: var(--muted); font-size: 10px; }
+        .status-pill strong { display: block; color: var(--text); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+        .ptt-btn {
+            width: 100%;
+            min-height: 132px;
+            padding: 0;
+            font-size: 23px;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+            border-radius: 8px;
+            border: 1px solid #2f363a;
+            background: linear-gradient(180deg, #242a2e 0%, #111416 100%);
+            color: #596169;
+            transition: 0.16s;
+            cursor: not-allowed;
+            margin-top: 12px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        .ptt-btn.ready { background: linear-gradient(180deg, #174d29 0%, #0f301c 100%); color: white; cursor: pointer; border-color: #42b761; }
+        .ptt-btn.active { background: linear-gradient(180deg, #d83a30 0%, #8b1712 100%); box-shadow: 0 0 30px rgba(228, 61, 48, 0.42), inset 0 1px 0 rgba(255,255,255,0.13); transform: scale(0.985); }
+        .unit-tag { padding: 8px; border-left: 4px solid var(--green); background: #171d1f; margin-bottom: 6px; border-radius: 0 4px 4px 0; font-family: Consolas, monospace; }
+        .unit-tag.speaking { border-left-color: var(--red); background: rgba(228, 61, 48, 0.14); color: white; box-shadow: inset 0 0 0 1px rgba(228, 61, 48, 0.35); }
+        .unit-tag.speaking::after { content: "PTT"; float: right; color: var(--red); font-size: 11px; font-weight: bold; }
         .channel-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-        .channel-panel { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 12px; }
-        .channel-panel.connected { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.35); }
-        .channel-panel.monitoring { border-color: #d29922; box-shadow: inset 0 0 0 1px rgba(210, 153, 34, 0.35); }
+        .channel-panel { background: #0c0f10; border: 1px solid #30363d; border-radius: 8px; padding: 12px; }
+        .channel-panel.connected { border-color: var(--green); box-shadow: inset 0 0 0 1px rgba(72, 207, 97, 0.35); }
+        .channel-panel.monitoring { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(242, 165, 26, 0.35); }
         .channel-panel h3 { margin: 0 0 10px 0; font-size: 15px; }
         .channel-panel .conn-btn { margin-bottom: 10px; }
-        .channel-units { height: 150px; overflow-y: auto; padding: 8px; border-radius: 6px; background: #010409; border: 1px solid #21262d; font-size: 13px; }
-        .conn-btn { width: 100%; padding: 12px; font-weight: bold; border-radius: 6px; border: none; background: #30363d; color: white; cursor: pointer; margin-bottom: 15px; }
-        .conn-btn.active { background: var(--accent); }
-        .monitor-btn { width: 100%; padding: 10px; font-weight: bold; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: white; cursor: pointer; margin-bottom: 10px; }
-        .monitor-btn.active { background: #d29922; color: #010409; border-color: #d29922; }
-        .monitor-btn:disabled { opacity: 0.42; cursor: not-allowed; }
+        .channel-units { height: 150px; overflow-y: auto; padding: 8px; border-radius: 6px; background: #050707; border: 1px solid #22282b; font-size: 13px; }
+        .conn-btn { width: 100%; padding: 12px; font-weight: bold; border-radius: 6px; border: 1px solid #3a4247; background: #242a2e; color: white; cursor: pointer; margin-bottom: 15px; }
+        .conn-btn.active { background: #17602d; border-color: #48cf61; }
+        .monitor-btn { width: 100%; padding: 10px; font-weight: bold; border-radius: 6px; border: 1px solid #30363d; background: #171d1f; color: white; cursor: pointer; margin-bottom: 10px; }
+        .monitor-btn.active { background: var(--accent); color: #07090a; border-color: var(--accent); }
+        .conn-btn:disabled, .monitor-btn:disabled { opacity: 0.42; cursor: not-allowed; }
         .tone-board { margin-top: 16px; border-top: 1px solid #30363d; padding-top: 14px; }
         .tone-board h3 { margin: 0 0 10px 0; font-size: 15px; }
         .tone-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
         .tone-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
-        .tone-btn { padding: 12px 8px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: white; cursor: pointer; font-weight: bold; }
+        .tone-btn { padding: 12px 8px; border-radius: 6px; border: 1px solid #30363d; background: #202529; color: white; cursor: pointer; font-weight: bold; }
         .tone-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .hidden { display: none; }
-        select, input { width: 100%; padding: 12px; background: #0d1117; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; margin-bottom: 10px; }
-        .mic-meter { height: 12px; background: #010409; border: 1px solid #30363d; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+        select, input { width: 100%; padding: 12px; background: #090c0d; border: 1px solid #30363d; color: white; border-radius: 6px; box-sizing: border-box; margin-bottom: 10px; }
+        .mic-meter { height: 12px; background: #050707; border: 1px solid #30363d; border-radius: 999px; overflow: hidden; margin-top: 8px; }
         .mic-meter-fill { width: 0%; height: 100%; background: var(--green); transition: width 0.08s linear, background 0.08s linear; }
         .mic-meter-fill.hot { background: #d29922; }
         .mic-meter-fill.clip { background: var(--red); }
         .mic-meter-label { display: block; margin-top: 6px; color: #8b949e; font-size: 11px; }
         label { font-size: 11px; color: #8b949e; text-transform: uppercase; font-weight: bold; }
+        .loading-screen {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: none;
+            place-items: center;
+            padding: 24px;
+            background: radial-gradient(circle at 50% 45%, rgba(149,255,141,0.08), transparent 34%), rgba(5, 7, 7, 0.96);
+        }
+        body.loading .loading-screen { display: grid; }
+        .loader-radio {
+            width: min(460px, 100%);
+            background: linear-gradient(180deg, #202529 0%, #101315 100%);
+            border: 1px solid #3b4449;
+            border-radius: 8px;
+            padding: 18px;
+            box-shadow: 0 24px 70px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
+        }
+        .loader-lcd {
+            background: #071508;
+            border: 2px solid #030503;
+            border-radius: 6px;
+            padding: 16px;
+            color: var(--lcd);
+            font-family: Consolas, 'Courier New', monospace;
+        }
+        .loader-title { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; font-weight: 800; letter-spacing: 0.08em; }
+        .loader-message { margin-top: 12px; color: var(--lcd-dim); font-size: 12px; text-transform: uppercase; }
+        .loader-bar { height: 10px; margin-top: 16px; border: 1px solid #1d3d20; background: #031004; overflow: hidden; }
+        .loader-bar::before {
+            content: "";
+            display: block;
+            width: 42%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, var(--lcd), transparent);
+            animation: scan 1.25s linear infinite;
+        }
+        .loader-footer { margin-top: 12px; color: var(--muted); font-size: 11px; font-family: Consolas, monospace; }
+        @keyframes scan {
+            from { transform: translateX(-110%); }
+            to { transform: translateX(250%); }
+        }
+        @media (max-width: 820px) {
+            body { padding: 12px; }
+            .dashboard { grid-template-columns: 1fr; }
+            .channel-grid { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
-<body>
+<body class="loading">
+
+<div class="loading-screen" id="loadingScreen" role="status" aria-live="polite" aria-busy="true">
+    <div class="loader-radio">
+        <div class="brand-row">
+            <div class="brand-mark">MOTOROLA SOLUTIONS</div>
+            <div class="model-mark">ASTRO 25 FIRE</div>
+        </div>
+        <div class="loader-lcd">
+            <div class="loader-title">
+                <span>RADIO SYSTEM BOOT</span>
+                <span id="loadingElapsed">00S</span>
+            </div>
+            <div class="loader-message" id="loadingMessage">WAKING RENDER RELAY...</div>
+            <div class="loader-bar" aria-hidden="true"></div>
+        </div>
+        <div class="loader-footer">Console locked until the dispatch relay is online.</div>
+    </div>
+</div>
 
 <div class="dashboard">
     <div class="sidebar">
         <div class="card">
-            <h3 style="margin-top:0">Radio Config</h3>
+            <div class="radio-head">
+                <div class="brand-row">
+                    <div class="brand-mark">MOTOROLA SOLUTIONS</div>
+                    <div class="model-mark">APX CONSOLE</div>
+                </div>
+                <div class="lcd-display">
+                    <div class="lcd-line-main">
+                        <span id="lcdChannel">FIRE RADIO</span>
+                        <span id="lcdMode">RX</span>
+                    </div>
+                    <div class="lcd-line-sub" id="lcdSubline">RELAY INITIALIZING</div>
+                </div>
+            </div>
+            <h3 style="margin-top:0">Subscriber Setup</h3>
             <label>Callsign</label>
             <input type="text" id="callsign" value="" placeholder="Enter callsign" required>
             <label>Roblox Username</label>
@@ -61,8 +210,11 @@
                 <div class="mic-meter-fill" id="micMeterFill"></div>
             </div>
             <span class="mic-meter-label" id="micMeterLabel">Mic inactive</span>
-            <p style="font-size: 11px; color: #8b949e; margin-top: 15px;">Status: <span id="socketStatus">Connecting...</span></p>
-            <p style="font-size: 11px; color: #8b949e; margin-top: 4px;">Audio: <span id="audioStatus">Idle</span></p>
+            <div class="status-row">
+                <div class="status-pill"><span>RELAY</span><strong id="socketStatus">CONNECTING</strong></div>
+                <div class="status-pill"><span>AUDIO</span><strong id="audioStatus">IDLE</strong></div>
+                <div class="status-pill"><span>SITE</span><strong id="siteStatus">RENDER</strong></div>
+            </div>
             <div class="tone-board">
                 <h3>Tone Board</h3>
                 <div id="toneLock">
@@ -83,10 +235,10 @@
 
     <div class="main">
         <div class="card">
-            <h2 style="margin:0 0 15px 0">Radio Channels</h2>
+            <h2 style="margin:0 0 15px 0">Fireground Talkgroups</h2>
             <div class="channel-grid" id="channelGrid"></div>
             <button class="ptt-btn" id="pttBtn" disabled>OFF AIR</button>
-            <p style="font-size: 11px; color: #8b949e; margin-top: 15px; text-align: center;">Resampling & Stream-Sync: ENABLED</p>
+            <p style="font-size: 11px; color: #8b949e; margin-top: 15px; text-align: center;">ASTRO IMBE AUDIO CHAIN | MDC BURSTS | SQUELCH TAIL | STREAM SYNC</p>
         </div>
     </div>
 </div>
@@ -94,7 +246,13 @@
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
     const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
-    const socket = io("https://fire-radio.onrender.com");
+    const socket = io("https://fire-radio.onrender.com", {
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 900,
+        reconnectionDelayMax: 4000,
+        timeout: 20000
+    });
     const PACKET_SIZE = 1024;
     const JITTER_TARGET = 0.08;
     const JITTER_MIN = 0.02;
@@ -137,6 +295,8 @@
         { id: 'all-clear', name: 'All Clear', pairs: [[523, 0.18], [659, 0.18], [784, 0.35]] }
     ];
     let txHeld = false, active = false, activeChannel = null;
+    let isTalking = false, isBinding = false;
+    let pttKeyCode = 'KeyX', pttKeyAccelerator = 'X';
     let isRequestingTx = false;
     let pointerPttId = null;
     let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, midBoostNode, distortionNode, workletNode, monitorGain, backgroundStaticGain, nextStartTime = 0;
@@ -157,6 +317,9 @@
     let rxCompressorGain = 1, rxDeesserGain = 1;
     let rxPacketBuffer = new Map(); // Buffer for reordering packets
     let rxNextSequence = new Map(); // Expected sequence numbers per callsign
+    let relayReady = false;
+    let loadingStartedAt = Date.now();
+    let loadingTimer = null;
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -170,6 +333,55 @@
         }
         registerProcessor('radio-processor', P);
     `;
+
+    function setText(id, text) {
+        const element = document.getElementById(id);
+        if (element) element.innerText = text;
+    }
+
+    function formatElapsed(ms) {
+        return `${String(Math.floor(ms / 1000)).padStart(2, '0')}S`;
+    }
+
+    function showLoading(message) {
+        setText('loadingMessage', message);
+        setText('siteStatus', 'WAKING');
+        document.body.classList.add('loading');
+        if (!loadingTimer) {
+            loadingStartedAt = Date.now();
+            loadingTimer = setInterval(() => {
+                setText('loadingElapsed', formatElapsed(Date.now() - loadingStartedAt));
+            }, 250);
+        }
+    }
+
+    function hideLoading() {
+        document.body.classList.remove('loading');
+        setText('siteStatus', 'ONLINE');
+        if (loadingTimer) {
+            clearInterval(loadingTimer);
+            loadingTimer = null;
+        }
+    }
+
+    function updateRadioDisplay() {
+        const channelText = activeChannel ? getChannelName(activeChannel) : (monitorChannel ? `MON ${getChannelName(monitorChannel)}` : 'FIRE RADIO');
+        const modeText = isTalking ? 'TX' : (isReceiving ? 'RX' : 'SCAN');
+        const callsign = getRequestedCallsign() || 'NO UNIT ID';
+        const relayText = socketConnected ? 'SITE LINKED' : 'SITE SEARCHING';
+
+        setText('lcdChannel', channelText.toUpperCase());
+        setText('lcdMode', modeText);
+        setText('lcdSubline', `${callsign} | ${relayText}`);
+    }
+
+    function requireRelayReady() {
+        if (socketConnected) return true;
+        showLoading("WAKING RENDER RELAY...");
+        setAudioStatus("Relay offline");
+        refreshConnectionStatus();
+        return false;
+    }
 
     function playTone(freq, start, dur, volume = 0.035, type = "square") {
         if (!audioCtx) return;
@@ -332,11 +544,13 @@
     }
 
     function setAudioStatus(text) {
-        document.getElementById('audioStatus').innerText = text;
+        setText('audioStatus', String(text).toUpperCase());
+        updateRadioDisplay();
     }
 
     function setCallsignStatus(text) {
-        document.getElementById('socketStatus').innerText = text;
+        setText('socketStatus', String(text).toUpperCase());
+        updateRadioDisplay();
     }
 
     function getChannelName(channelId) {
@@ -346,18 +560,18 @@
 
     function refreshConnectionStatus() {
         if (!socketConnected) {
-            setCallsignStatus("OFFLINE");
+            setCallsignStatus("SITE SEARCHING");
             return;
         }
 
         if (!getRequestedCallsign()) {
-            setCallsignStatus("ONLINE - ENTER CALLSIGN");
+            setCallsignStatus("ONLINE - ENTER ID");
             return;
         }
 
         const transmitStatus = activeChannel ? `TX ${getChannelName(activeChannel)}` : "NO TX CHANNEL";
         const monitorStatus = monitorChannel ? ` | MON ${getChannelName(monitorChannel)}` : "";
-        setCallsignStatus(`ONLINE - ${transmitStatus}${monitorStatus}`);
+        setCallsignStatus(`LINKED - ${transmitStatus}${monitorStatus}`);
     }
 
     function getRequestedCallsign() {
@@ -861,6 +1075,7 @@
     });
 
     async function setActiveChannel(channelId) {
+        if (!requireRelayReady()) return;
         if (!requireCallsign()) return;
 
         try {
@@ -898,11 +1113,12 @@
             stopMicPipeline();
             updateUI();
             setAudioStatus("Mic error");
-            document.getElementById('socketStatus').innerText = "MIC ERROR";
+            setCallsignStatus("MIC ERROR");
         }
     }
 
     async function setMonitorChannel(channelId) {
+        if (!requireRelayReady()) return;
         if (!requireCallsign()) return;
         if (channelId === activeChannel) {
             if (monitorChannel) {
@@ -945,6 +1161,11 @@
     }
 
     function syncWithServer() {
+        if (!socketConnected) {
+            refreshConnectionStatus();
+            return;
+        }
+
         const callsignInput = document.getElementById('callsign');
         const requestedCallsign = getRequestedCallsign();
 
@@ -1002,6 +1223,10 @@
 
     function requestTxStart() {
         return new Promise((resolve) => {
+            if (!socketConnected) {
+                resolve({ ok: false, reason: 'relay-offline' });
+                return;
+            }
             const timeout = setTimeout(() => resolve({ ok: true, assumed: true }), 1200);
             socket.emit('tx-status', { transmitting: true }, (response) => {
                 clearTimeout(timeout);
@@ -1024,13 +1249,15 @@
             panel.classList.toggle('monitoring', isMonitoring);
             btn.classList.toggle('active', isConnected);
             monitorBtn.classList.toggle('active', isMonitoring);
-            monitorBtn.disabled = isConnected;
-            btn.innerText = isConnected ? "DISCONNECT" : "CONNECT";
+            btn.disabled = !socketConnected;
+            monitorBtn.disabled = !socketConnected || isConnected;
+            btn.innerText = isConnected ? "RELEASE TX" : "SELECT TX";
             monitorBtn.innerText = isConnected ? "ON CHANNEL" : (isMonitoring ? "STOP MONITOR" : "MONITOR");
         });
-        ptt.disabled = !active;
-        ptt.classList.toggle('ready', active);
-        ptt.innerText = active ? `HOLD ${pttKeyAccelerator}` : "OFF AIR";
+        ptt.disabled = !active || !socketConnected;
+        ptt.classList.toggle('ready', active && socketConnected);
+        ptt.innerText = !socketConnected ? "RELAY OFFLINE" : (active ? `HOLD ${pttKeyAccelerator}` : "OFF AIR");
+        updateRadioDisplay();
     }
 
     function escapeHtml(value) {
@@ -1068,6 +1295,7 @@
 
     async function startTX() {
         if (isTalking || isRequestingTx || !active || !audioCtx) return;
+        if (!requireRelayReady()) return;
         if (!requireCallsign()) return;
         txHeld = true;
         isRequestingTx = true;
@@ -1081,6 +1309,8 @@
                 txHeld = false;
                 const busyText = txGrant.reason === 'channel-busy'
                     ? `Channel busy: ${txGrant.callsign || 'UNKNOWN'}`
+                    : txGrant.reason === 'relay-offline'
+                        ? "Relay offline"
                     : "Unable to transmit";
                 setAudioStatus(busyText);
                 return;
@@ -1092,6 +1322,7 @@
             }
 
             isTalking = true;
+            updateRadioDisplay();
             resetTxBuffer();
             txPacketGain = 1;
             txCompressorGain = 1;
@@ -1116,6 +1347,7 @@
         if (txOffset > 0 && audioCtx) emitAudioPacket(txBuffer, txOffset);
         resetTxBuffer();
         isTalking = false;
+        updateRadioDisplay();
         socket.emit('tx-status', { transmitting: false });
         playMicClick("up");
         if (playTone) playRadioBeep("stop");
@@ -1274,11 +1506,33 @@
 
     socket.on('connect', () => {
         socketConnected = true;
+        relayReady = true;
+        hideLoading();
         refreshConnectionStatus();
+        updateUI();
         syncWithServer();
     });
     socket.on('disconnect', () => {
         socketConnected = false;
+        relayReady = false;
+        if (isTalking) stopTX(false);
+        active = false;
+        activeChannel = null;
+        monitorChannel = null;
+        showLoading("RECONNECTING TO RENDER RELAY...");
+        refreshConnectionStatus();
+        updateUI();
+    });
+    socket.io.on('reconnect_attempt', () => {
+        if (!relayReady) {
+            showLoading("WAKING RENDER RELAY...");
+        } else {
+            showLoading("RECONNECTING TO RENDER RELAY...");
+        }
+        refreshConnectionStatus();
+    });
+    socket.on('connect_error', () => {
+        showLoading("RENDER RELAY STILL LOADING...");
         refreshConnectionStatus();
     });
     socket.on('unit-list-update', (units) => {
@@ -1309,10 +1563,15 @@
         });
     }
 
+    showLoading("WAKING RENDER RELAY...");
+
     navigator.mediaDevices.enumerateDevices().then(devs => {
         const sel = document.getElementById('micInput');
         devs.filter(d => d.kind === 'audioinput').forEach(d => sel.innerHTML += `<option value="${d.deviceId}">${d.label || 'Mic'}</option>`);
+    }).catch(() => {
+        setAudioStatus("Mic list unavailable");
     });
+    document.getElementById('callsign').oninput = updateRadioDisplay;
     document.getElementById('callsign').onchange = syncWithServer;
     document.getElementById('robloxUsername').onchange = syncWithServer;
     document.getElementById('toneUnlockBtn').addEventListener('click', unlockToneBoard);
@@ -1328,7 +1587,7 @@
     document.getElementById('channelGrid').innerHTML = CHANNELS.map(channel => `
         <div class="channel-panel" data-channel-panel="${channel.id}">
             <h3>${escapeHtml(channel.name)}</h3>
-            <button class="conn-btn" data-channel-connect="${channel.id}">CONNECT</button>
+            <button class="conn-btn" data-channel-connect="${channel.id}">SELECT TX</button>
             <button class="monitor-btn" data-channel-monitor="${channel.id}">MONITOR</button>
             <div class="channel-units" data-channel-units="${channel.id}">No units connected</div>
         </div>
@@ -1338,6 +1597,7 @@
         document.querySelector(`[data-channel-monitor="${channel.id}"]`).addEventListener('click', () => setMonitorChannel(channel.id));
     });
     updateUI();
+    updateRadioDisplay();
     registerGlobalPtt();
 </script>
 </body>
