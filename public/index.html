@@ -258,30 +258,30 @@
     const JITTER_MIN = 0.02;
     const JITTER_MAX = 0.25;
     const MAX_INT16 = 0x7FFF;
-    const TX_TARGET_RMS = 0.12;
-    const TX_NOISE_FLOOR = 0.002;
-    const TX_GATE_FLOOR = 0.004;
-    const TX_MIN_GAIN = 0.45;
-    const TX_MAX_GAIN = 7.0;
-    const TX_LIMIT = 0.78;
-    const TX_COMPRESSION_RATIO = 4.5;
+    const TX_TARGET_RMS = 0.14;
+    const TX_NOISE_FLOOR = 0.003;
+    const TX_GATE_FLOOR = 0.006;
+    const TX_MIN_GAIN = 0.4;
+    const TX_MAX_GAIN = 12.0;
+    const TX_LIMIT = 0.65;
+    const TX_COMPRESSION_RATIO = 7.5;
     const TX_ATTACK_TIME = 0.002;
     const TX_RELEASE_TIME = 0.15;
     const TX_DEESS_FREQ = 5500;
     const TX_DEESS_RATIO = 3.0;
-    const RX_TARGET_RMS = 0.13;
-    const RX_NOISE_FLOOR = 0.0015;
-    const RX_MIN_GAIN = 0.5;
-    const RX_MAX_GAIN = 8.0;
-    const RX_LIMIT = 0.82;
-    const RX_OUTPUT_GAIN = 1.0;
-    const RX_COMPRESSION_RATIO = 4.0;
+    const RX_TARGET_RMS = 0.16;
+    const RX_NOISE_FLOOR = 0.002;
+    const RX_MIN_GAIN = 0.4;
+    const RX_MAX_GAIN = 14.0;
+    const RX_LIMIT = 0.75;
+    const RX_OUTPUT_GAIN = 1.25;
+    const RX_COMPRESSION_RATIO = 6.0;
     const RX_ATTACK_TIME = 0.001;
     const RX_RELEASE_TIME = 0.08;
     const RX_DEESS_FREQ = 5000;
     const RX_DEESS_RATIO = 4.0;
     const ADAPTIVE_WINDOW = 15;
-    const ADAPTIVE_RANGE = 0.22;
+    const ADAPTIVE_RANGE = 0.4;
     const PACKET_BUFFER_SIZE = 8;
     const CHANNELS = [
         { id: 'fire-rto', name: 'Fire RTO' },
@@ -299,7 +299,7 @@
     let pttKeyCode = 'KeyX', pttKeyAccelerator = 'X';
     let isRequestingTx = false;
     let pointerPttId = null;
-    let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, midBoostNode, distortionNode, workletNode, monitorGain, backgroundStaticGain, nextStartTime = 0;
+    let audioCtx, micStream, sourceNode, highpassNode, lowpassNode, midBoostNode, distortionNode, workletNode, monitorGain, nextStartTime = 0;
     let txBuffer = new Float32Array(PACKET_SIZE), txOffset = 0, txSequence = 0;
     let txPackets = 0, rxPackets = 0, lastMicPeak = 0;
     let micMeterLevel = 0, lastMeterUpdate = 0;
@@ -452,36 +452,6 @@
         }
     }
 
-    function playNoiseBurst(start, dur, volume = 0.012) {
-        if (!audioCtx) return;
-
-        const sampleCount = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
-        const buffer = audioCtx.createBuffer(1, sampleCount, audioCtx.sampleRate);
-        const data = buffer.getChannelData(0);
-
-        for (let i = 0; i < sampleCount; i++) {
-            data[i] = (Math.random() * 2 - 1) * (1 - i / sampleCount);
-        }
-
-        const src = audioCtx.createBufferSource();
-        const filter = audioCtx.createBiquadFilter();
-        const g = audioCtx.createGain();
-        const t = audioCtx.currentTime + start;
-
-        filter.type = "bandpass";
-        filter.frequency.value = 1800;
-        filter.Q.value = 6.0; // High Q for realistic hollow resonance
-        g.gain.setValueAtTime(volume, t);
-        g.gain.linearRampToValueAtTime(0.001, t + dur);
-
-        src.buffer = buffer;
-        src.connect(filter);
-        filter.connect(g);
-        g.connect(audioCtx.destination);
-        src.start(t);
-        src.stop(t + dur);
-    }
-
     function playMotorolaControlBurst(start, pattern) {
         pattern.forEach(([fromFreq, toFreq, offset, dur, volume]) => {
             const osc = audioCtx.createOscillator();
@@ -502,24 +472,17 @@
         });
     }
 
-    function initBackgroundStatic() {
-        backgroundStaticGain = null;
-    }
-
-    function updateStaticLevel(isReceivingAudio) {
-        return;
-    }
-
     function playRadioBeep(type) {
         if (!audioCtx) return;
 
         try {
             if (type === "start") {
-                playTone(910, 0.012, 0.045, 0.018, "sine");
-                playMDC1200(0.066, 0.017);
+                playTone(1050, 0.004, 0.07, 0.045, "square");
+                playMDC1200(0.085, 0.032);
             } else {
-                playMDC1200(0, 0.015);
-                playTone(185, 0.18, 0.038, 0.026, "sine");
+                playMDC1200(0, 0.03);
+                playTone(520, 0.19, 0.055, 0.034, "square");
+                playTone(185, 0.25, 0.045, 0.03, "sine");
             }
         } catch (err) {
             console.warn('Unable to play radio beep', err);
@@ -921,7 +884,6 @@
         if (!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
             await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletCode], {type:'application/javascript'})));
-            initBackgroundStatic();
         }
         await audioCtx.resume();
     }
@@ -955,7 +917,6 @@
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
         monitorGain = audioCtx.createGain();
-        updateStaticLevel(false);
         monitorGain.gain.value = 0;
 
         workletNode.port.onmessage = (e) => {
@@ -1068,7 +1029,6 @@
             active = Boolean(nextChannel);
             activeChannel = nextChannel;
             if (monitorChannel && monitorChannel === activeChannel) {
-                updateStaticLevel(false);
                 monitorChannel = null;
                 socket.emit('monitor-channel', null);
             }
@@ -1088,7 +1048,6 @@
 
             updateUI();
             syncWithServer();
-            updateStaticLevel(false);
         } catch (err) {
             console.error('Unable to connect audio', err);
             active = false;
@@ -1124,7 +1083,6 @@
             rxDeesserGain = 1;
             socket.emit('monitor-channel', monitorChannel, (response) => {
                 if (!response || !response.ok) {
-                    updateStaticLevel(false);
                     monitorChannel = null;
                     setAudioStatus("Monitor unavailable");
                 }
@@ -1133,7 +1091,6 @@
             });
             updateUI();
             refreshConnectionStatus();
-            updateStaticLevel(false);
         } catch (err) {
             console.error('Unable to start monitor audio', err);
             monitorChannel = null;
@@ -1277,15 +1234,15 @@
     }
 
     async function startTX() {
-        if (isTalking || isRequestingTx || !active || !audioCtx) return;
+        if (isTalking || isRequestingTx || !active) return;
         if (!requireRelayReady()) return;
         if (!requireCallsign()) return;
         txHeld = true;
         isRequestingTx = true;
 
         try {
-            playMicClick("down");
             await ensureAudioContext();
+            playMicClick("down");
             await startMicPipeline();
             const txGrant = await requestTxStart();
             if (!txGrant.ok) {
@@ -1433,12 +1390,10 @@
 
         if (!isReceiving) {
             isReceiving = true;
-            updateStaticLevel(true);
         }
         clearTimeout(rxTimeout);
         rxTimeout = setTimeout(() => {
             isReceiving = false;
-            updateStaticLevel(false);
         }, 500);
 
         rxPackets++;
