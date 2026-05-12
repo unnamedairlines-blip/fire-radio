@@ -258,30 +258,30 @@
     const JITTER_MIN = 0.02;
     const JITTER_MAX = 0.25;
     const MAX_INT16 = 0x7FFF;
-    const TX_TARGET_RMS = 0.12;
-    const TX_NOISE_FLOOR = 0.002;
-    const TX_GATE_FLOOR = 0.004;
-    const TX_MIN_GAIN = 0.45;
-    const TX_MAX_GAIN = 7.0;
-    const TX_LIMIT = 0.78;
-    const TX_COMPRESSION_RATIO = 4.5;
+    const TX_TARGET_RMS = 0.14;
+    const TX_NOISE_FLOOR = 0.003;
+    const TX_GATE_FLOOR = 0.006;
+    const TX_MIN_GAIN = 0.4;
+    const TX_MAX_GAIN = 12.0;
+    const TX_LIMIT = 0.65;
+    const TX_COMPRESSION_RATIO = 7.5;
     const TX_ATTACK_TIME = 0.002;
     const TX_RELEASE_TIME = 0.15;
     const TX_DEESS_FREQ = 5500;
     const TX_DEESS_RATIO = 3.0;
-    const RX_TARGET_RMS = 0.13;
-    const RX_NOISE_FLOOR = 0.0015;
-    const RX_MIN_GAIN = 0.5;
-    const RX_MAX_GAIN = 8.0;
-    const RX_LIMIT = 0.82;
-    const RX_OUTPUT_GAIN = 1.0;
-    const RX_COMPRESSION_RATIO = 4.0;
+    const RX_TARGET_RMS = 0.16;
+    const RX_NOISE_FLOOR = 0.002;
+    const RX_MIN_GAIN = 0.4;
+    const RX_MAX_GAIN = 14.0;
+    const RX_LIMIT = 0.75;
+    const RX_OUTPUT_GAIN = 1.25;
+    const RX_COMPRESSION_RATIO = 6.0;
     const RX_ATTACK_TIME = 0.001;
     const RX_RELEASE_TIME = 0.08;
     const RX_DEESS_FREQ = 5000;
     const RX_DEESS_RATIO = 4.0;
     const ADAPTIVE_WINDOW = 15;
-    const ADAPTIVE_RANGE = 0.22;
+    const ADAPTIVE_RANGE = 0.4;
     const PACKET_BUFFER_SIZE = 8;
     const CHANNELS = [
         { id: 'fire-rto', name: 'Fire RTO' },
@@ -515,11 +515,12 @@
 
         try {
             if (type === "start") {
-                playTone(910, 0.012, 0.045, 0.018, "sine");
-                playMDC1200(0.066, 0.017);
+                playTone(1050, 0.004, 0.07, 0.045, "square");
+                playMDC1200(0.085, 0.032);
             } else {
-                playMDC1200(0, 0.015);
-                playTone(185, 0.18, 0.038, 0.026, "sine");
+                playMDC1200(0, 0.03);
+                playTone(520, 0.19, 0.055, 0.034, "square");
+                playTone(185, 0.25, 0.045, 0.03, "sine");
             }
         } catch (err) {
             console.warn('Unable to play radio beep', err);
@@ -595,7 +596,7 @@
         // Calculate target gain with compression
         let targetGain = Math.min(TX_MAX_GAIN, Math.max(TX_MIN_GAIN, TX_TARGET_RMS / rms));
 
-        // Apply moderate compression without crushing consonants.
+        // Apply compression for radio-like punch
         if (rms > TX_TARGET_RMS * 1.2) {
             const over = rms / TX_TARGET_RMS;
             const compressed = 1 + (over - 1) / TX_COMPRESSION_RATIO;
@@ -606,7 +607,7 @@
         const smoothing = targetGain < txPacketGain ? 0.8 : 0.6;
         txPacketGain = txPacketGain * (1 - smoothing) + targetGain * smoothing;
 
-        // Process samples with compression envelope and light de-essing.
+        // Process samples with compression envelope and de-essing
         const output = new Float32Array(length);
         let compressorEnv = txCompressorGain;
         let deesserEnv = txDeesserGain;
@@ -619,13 +620,13 @@
             const deessAlpha = 2 * Math.PI * TX_DEESS_FREQ / sampleRate;
             const deessCoeff = Math.exp(-deessAlpha);
             const highFreq = value - deesserEnv * deessCoeff;
-            const deessAmount = Math.max(0, highFreq) * 0.18;
+            const deessAmount = Math.max(0, highFreq) * 0.3;
             if (deessAmount > 0.01) {
                 deesserEnv = deesserEnv * (1 - 1/TX_DEESS_RATIO) + deessAmount * (1/TX_DEESS_RATIO);
             } else {
                 deesserEnv *= 0.998;
             }
-            value -= deesserEnv * 0.08;
+            value -= deesserEnv * 0.15;
 
             // Apply compression envelope
             const absValue = Math.abs(value);
@@ -635,11 +636,11 @@
             compressorEnv = Math.min(1, compressorEnv + 1/(sampleRate * TX_RELEASE_TIME));
 
             // Apply gain and limiting
-            value = value * txPacketGain * compressorEnv * 1.0;
+            value = value * txPacketGain * compressorEnv * 1.1; // Boost for radio punch
 
             // Soft limiting
-            if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.14;
-            if (value < -TX_LIMIT) value = -TX_LIMIT + (value + TX_LIMIT) * 0.14;
+            if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.08;
+            if (value < -TX_LIMIT) value = -TX_LIMIT + (value + TX_LIMIT) * 0.08;
 
             output[i] = Math.max(-1, Math.min(1, value));
         }
@@ -708,12 +709,12 @@
             }
         }
 
-        // Calculate target gain with enough leveling for radio use while preserving clarity.
+        // Calculate target gain with aggressive compression for radio sound
         let targetGain = rms > RX_NOISE_FLOOR
             ? Math.min(RX_MAX_GAIN, Math.max(RX_MIN_GAIN, rxAdaptiveTarget / rms))
             : 1;
 
-        // Apply moderate compression for consistent loudness.
+        // Apply heavy compression for radio-like dynamics
         if (rms > rxAdaptiveTarget * 1.1) {
             const over = rms / rxAdaptiveTarget;
             const compressed = 1 + (over - 1) / RX_COMPRESSION_RATIO;
@@ -721,11 +722,11 @@
         }
 
         const previousGain = rxGainByCallsign.get(callsign) || 1;
-        const smoothing = targetGain < previousGain ? 0.72 : 0.5;
+        const smoothing = targetGain < previousGain ? 0.9 : 0.7;
         const playbackGain = previousGain * (1 - smoothing) + targetGain * smoothing;
         rxGainByCallsign.set(callsign, playbackGain);
 
-        // Process samples with compression and light de-essing.
+        // Process samples with compression and de-essing
         const output = new Float32Array(samples.length);
         let compressorEnv = rxCompressorGain;
         let deesserEnv = rxDeesserGain;
@@ -738,17 +739,17 @@
             const deessAlpha = 2 * Math.PI * RX_DEESS_FREQ / sampleRate;
             const deessCoeff = Math.exp(-deessAlpha);
             const highFreq = value - deesserEnv * deessCoeff;
-            const deessAmount = Math.max(0, highFreq) * 0.16;
+            const deessAmount = Math.max(0, highFreq) * 0.25;
             if (deessAmount > 0.005) {
                 deesserEnv = deesserEnv * (1 - 1/RX_DEESS_RATIO) + deessAmount * (1/RX_DEESS_RATIO);
             } else {
                 deesserEnv *= 0.999;
             }
-            value -= deesserEnv * 0.07;
+            value -= deesserEnv * 0.12;
 
             // Apply compression envelope
             const absValue = Math.abs(value);
-            if (absValue > rxAdaptiveTarget * 0.85) {
+            if (absValue > rxAdaptiveTarget * 0.7) {
                 compressorEnv = Math.min(compressorEnv, rxAdaptiveTarget / absValue);
             }
             compressorEnv = Math.min(1, compressorEnv + 1/(sampleRate * RX_RELEASE_TIME));
@@ -757,8 +758,8 @@
             value = value * playbackGain * compressorEnv * RX_OUTPUT_GAIN;
 
             // Soft limiting
-            if (value > RX_LIMIT) value = RX_LIMIT + (value - RX_LIMIT) * 0.12;
-            if (value < -RX_LIMIT) value = -RX_LIMIT + (value + RX_LIMIT) * 0.12;
+            if (value > RX_LIMIT) value = RX_LIMIT + (value - RX_LIMIT) * 0.06;
+            if (value < -RX_LIMIT) value = -RX_LIMIT + (value + RX_LIMIT) * 0.06;
 
             value = Math.max(-1, Math.min(1, value));
             output[i] = value;
@@ -937,7 +938,6 @@
                 echoCancellation: true,
                 noiseSuppression: true,
                 autoGainControl: false,
-                channelCount: 1,
                 sampleRate: audioCtx.sampleRate
             }
         });
@@ -946,19 +946,13 @@
 
         highpassNode = audioCtx.createBiquadFilter();
         highpassNode.type = "highpass";
-        highpassNode.frequency.value = 160;
-        highpassNode.Q.value = 0.8;
-
-        midBoostNode = audioCtx.createBiquadFilter();
-        midBoostNode.type = "peaking";
-        midBoostNode.frequency.value = 2400;
-        midBoostNode.Q.value = 0.85;
-        midBoostNode.gain.value = 2.5;
+        highpassNode.frequency.value = 350;
+        highpassNode.Q.value = 1.1;
 
         lowpassNode = audioCtx.createBiquadFilter();
         lowpassNode.type = "lowpass";
-        lowpassNode.frequency.value = 4200;
-        lowpassNode.Q.value = 0.75;
+        lowpassNode.frequency.value = 3000;
+        lowpassNode.Q.value = 1.1;
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
         monitorGain = audioCtx.createGain();
@@ -971,8 +965,7 @@
         };
 
         sourceNode.connect(highpassNode);
-        highpassNode.connect(midBoostNode);
-        midBoostNode.connect(lowpassNode);
+        highpassNode.connect(lowpassNode);
         lowpassNode.connect(workletNode);
         workletNode.connect(monitorGain);
         monitorGain.connect(audioCtx.destination);
