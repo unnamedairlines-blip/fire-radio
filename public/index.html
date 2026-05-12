@@ -258,30 +258,30 @@
     const JITTER_MIN = 0.02;
     const JITTER_MAX = 0.25;
     const MAX_INT16 = 0x7FFF;
-    const TX_TARGET_RMS = 0.14;
-    const TX_NOISE_FLOOR = 0.003;
-    const TX_GATE_FLOOR = 0.006;
-    const TX_MIN_GAIN = 0.4;
-    const TX_MAX_GAIN = 12.0;
-    const TX_LIMIT = 0.65;
-    const TX_COMPRESSION_RATIO = 7.5;
+    const TX_TARGET_RMS = 0.12;
+    const TX_NOISE_FLOOR = 0.002;
+    const TX_GATE_FLOOR = 0.004;
+    const TX_MIN_GAIN = 0.45;
+    const TX_MAX_GAIN = 7.0;
+    const TX_LIMIT = 0.78;
+    const TX_COMPRESSION_RATIO = 4.5;
     const TX_ATTACK_TIME = 0.002;
     const TX_RELEASE_TIME = 0.15;
     const TX_DEESS_FREQ = 5500;
     const TX_DEESS_RATIO = 3.0;
-    const RX_TARGET_RMS = 0.16;
-    const RX_NOISE_FLOOR = 0.002;
-    const RX_MIN_GAIN = 0.4;
-    const RX_MAX_GAIN = 14.0;
-    const RX_LIMIT = 0.75;
-    const RX_OUTPUT_GAIN = 1.25;
-    const RX_COMPRESSION_RATIO = 6.0;
+    const RX_TARGET_RMS = 0.13;
+    const RX_NOISE_FLOOR = 0.0015;
+    const RX_MIN_GAIN = 0.5;
+    const RX_MAX_GAIN = 8.0;
+    const RX_LIMIT = 0.82;
+    const RX_OUTPUT_GAIN = 1.0;
+    const RX_COMPRESSION_RATIO = 4.0;
     const RX_ATTACK_TIME = 0.001;
     const RX_RELEASE_TIME = 0.08;
     const RX_DEESS_FREQ = 5000;
     const RX_DEESS_RATIO = 4.0;
     const ADAPTIVE_WINDOW = 15;
-    const ADAPTIVE_RANGE = 0.4;
+    const ADAPTIVE_RANGE = 0.22;
     const PACKET_BUFFER_SIZE = 8;
     const CHANNELS = [
         { id: 'fire-rto', name: 'Fire RTO' },
@@ -399,22 +399,32 @@
         osc.start(t); osc.stop(t + dur + 0.02);
     }
 
-    function playMDC1200(start) {
+    function playMDC1200(start, volume = 0.02) {
         if (!audioCtx) return;
         const t = audioCtx.currentTime + start;
-        const dur = 0.18;
+        const bitTime = 0.0075;
+        const pattern = [1,0,1,1,0,0,1,0,1,0,0,1,1,1,0,1,0,0,1,1,0,1,0,1];
+        const dur = pattern.length * bitTime;
         const mdcOsc = audioCtx.createOscillator();
+        const mdcFilter = audioCtx.createBiquadFilter();
         const mdcG = audioCtx.createGain();
+
         mdcOsc.type = "sine";
-        for(let i=0; i<15; i++) {
-            mdcOsc.frequency.setValueAtTime(i%2 === 0 ? 1200 : 1800, t + (i*0.012));
-        }
+        pattern.forEach((bit, i) => {
+            mdcOsc.frequency.setValueAtTime(bit ? 1800 : 1200, t + i * bitTime);
+        });
+        mdcFilter.type = "bandpass";
+        mdcFilter.frequency.value = 1500;
+        mdcFilter.Q.value = 3.8;
         mdcG.gain.setValueAtTime(0, t);
-        mdcG.gain.linearRampToValueAtTime(0.025, t + 0.005);
-        mdcG.gain.setValueAtTime(0.025, t + dur - 0.005);
-        mdcG.gain.linearRampToValueAtTime(0, t + dur);
-        mdcOsc.connect(mdcG); mdcG.connect(audioCtx.destination);
-        mdcOsc.start(t); mdcOsc.stop(t + dur);
+        mdcG.gain.linearRampToValueAtTime(volume, t + 0.006);
+        mdcG.gain.setValueAtTime(volume, t + dur - 0.01);
+        mdcG.gain.linearRampToValueAtTime(0.001, t + dur);
+        mdcOsc.connect(mdcFilter);
+        mdcFilter.connect(mdcG);
+        mdcG.connect(audioCtx.destination);
+        mdcOsc.start(t);
+        mdcOsc.stop(t + dur + 0.02);
     }
 
     function playMicClick(type = "down") {
@@ -493,32 +503,11 @@
     }
 
     function initBackgroundStatic() {
-        if (!audioCtx || backgroundStaticGain) return;
-        
-        const bufferSize = audioCtx.sampleRate * 2;
-        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-            data[i] = (Math.random() * 2 - 1) * 0.0025; // Constant very low hiss
-        }
-
-        const noise = audioCtx.createBufferSource();
-        noise.buffer = buffer;
-        noise.loop = true;
-        
-        backgroundStaticGain = audioCtx.createGain();
-        backgroundStaticGain.gain.value = 0; // Starts muted
-        
-        noise.connect(backgroundStaticGain);
-        backgroundStaticGain.connect(audioCtx.destination);
-        noise.start();
+        backgroundStaticGain = null;
     }
 
     function updateStaticLevel(isReceivingAudio) {
-        if (!backgroundStaticGain) return;
-        // Duck the static when receiving clear voice, boost it when idle
-        const target = active ? (isReceivingAudio ? 0.4 : 1.0) : 0;
-        backgroundStaticGain.gain.setTargetAtTime(target, audioCtx.currentTime, 0.1);
+        return;
     }
 
     function playRadioBeep(type) {
@@ -526,17 +515,11 @@
 
         try {
             if (type === "start") {
-                playNoiseBurst(0, 0.018, 0.009);
-                playMotorolaControlBurst(0, [
-                    [1700, 2350, 0.012, 0.032, 0.018],
-                    [1350, 950, 0.048, 0.038, 0.016]
-                ]);
+                playTone(910, 0.012, 0.045, 0.018, "sine");
+                playMDC1200(0.066, 0.017);
             } else {
-                playMotorolaControlBurst(0, [
-                    [950, 1450, 0, 0.04, 0.017],
-                    [1850, 1250, 0.045, 0.052, 0.015]
-                ]);
-                playNoiseBurst(0.092, 0.065, 0.012);
+                playMDC1200(0, 0.015);
+                playTone(185, 0.18, 0.038, 0.026, "sine");
             }
         } catch (err) {
             console.warn('Unable to play radio beep', err);
@@ -612,7 +595,7 @@
         // Calculate target gain with compression
         let targetGain = Math.min(TX_MAX_GAIN, Math.max(TX_MIN_GAIN, TX_TARGET_RMS / rms));
 
-        // Apply compression for radio-like punch
+        // Apply moderate compression without crushing consonants.
         if (rms > TX_TARGET_RMS * 1.2) {
             const over = rms / TX_TARGET_RMS;
             const compressed = 1 + (over - 1) / TX_COMPRESSION_RATIO;
@@ -623,7 +606,7 @@
         const smoothing = targetGain < txPacketGain ? 0.8 : 0.6;
         txPacketGain = txPacketGain * (1 - smoothing) + targetGain * smoothing;
 
-        // Process samples with compression envelope and de-essing
+        // Process samples with compression envelope and light de-essing.
         const output = new Float32Array(length);
         let compressorEnv = txCompressorGain;
         let deesserEnv = txDeesserGain;
@@ -636,13 +619,13 @@
             const deessAlpha = 2 * Math.PI * TX_DEESS_FREQ / sampleRate;
             const deessCoeff = Math.exp(-deessAlpha);
             const highFreq = value - deesserEnv * deessCoeff;
-            const deessAmount = Math.max(0, highFreq) * 0.3;
+            const deessAmount = Math.max(0, highFreq) * 0.18;
             if (deessAmount > 0.01) {
                 deesserEnv = deesserEnv * (1 - 1/TX_DEESS_RATIO) + deessAmount * (1/TX_DEESS_RATIO);
             } else {
                 deesserEnv *= 0.998;
             }
-            value -= deesserEnv * 0.15;
+            value -= deesserEnv * 0.08;
 
             // Apply compression envelope
             const absValue = Math.abs(value);
@@ -652,11 +635,11 @@
             compressorEnv = Math.min(1, compressorEnv + 1/(sampleRate * TX_RELEASE_TIME));
 
             // Apply gain and limiting
-            value = value * txPacketGain * compressorEnv * 1.1; // Boost for radio punch
+            value = value * txPacketGain * compressorEnv * 1.0;
 
             // Soft limiting
-            if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.08;
-            if (value < -TX_LIMIT) value = -TX_LIMIT + (value + TX_LIMIT) * 0.08;
+            if (value > TX_LIMIT) value = TX_LIMIT + (value - TX_LIMIT) * 0.14;
+            if (value < -TX_LIMIT) value = -TX_LIMIT + (value + TX_LIMIT) * 0.14;
 
             output[i] = Math.max(-1, Math.min(1, value));
         }
@@ -725,12 +708,12 @@
             }
         }
 
-        // Calculate target gain with aggressive compression for radio sound
+        // Calculate target gain with enough leveling for radio use while preserving clarity.
         let targetGain = rms > RX_NOISE_FLOOR
             ? Math.min(RX_MAX_GAIN, Math.max(RX_MIN_GAIN, rxAdaptiveTarget / rms))
             : 1;
 
-        // Apply heavy compression for radio-like dynamics
+        // Apply moderate compression for consistent loudness.
         if (rms > rxAdaptiveTarget * 1.1) {
             const over = rms / rxAdaptiveTarget;
             const compressed = 1 + (over - 1) / RX_COMPRESSION_RATIO;
@@ -738,11 +721,11 @@
         }
 
         const previousGain = rxGainByCallsign.get(callsign) || 1;
-        const smoothing = targetGain < previousGain ? 0.9 : 0.7;
+        const smoothing = targetGain < previousGain ? 0.72 : 0.5;
         const playbackGain = previousGain * (1 - smoothing) + targetGain * smoothing;
         rxGainByCallsign.set(callsign, playbackGain);
 
-        // Process samples with compression and de-essing
+        // Process samples with compression and light de-essing.
         const output = new Float32Array(samples.length);
         let compressorEnv = rxCompressorGain;
         let deesserEnv = rxDeesserGain;
@@ -755,17 +738,17 @@
             const deessAlpha = 2 * Math.PI * RX_DEESS_FREQ / sampleRate;
             const deessCoeff = Math.exp(-deessAlpha);
             const highFreq = value - deesserEnv * deessCoeff;
-            const deessAmount = Math.max(0, highFreq) * 0.25;
+            const deessAmount = Math.max(0, highFreq) * 0.16;
             if (deessAmount > 0.005) {
                 deesserEnv = deesserEnv * (1 - 1/RX_DEESS_RATIO) + deessAmount * (1/RX_DEESS_RATIO);
             } else {
                 deesserEnv *= 0.999;
             }
-            value -= deesserEnv * 0.12;
+            value -= deesserEnv * 0.07;
 
             // Apply compression envelope
             const absValue = Math.abs(value);
-            if (absValue > rxAdaptiveTarget * 0.7) {
+            if (absValue > rxAdaptiveTarget * 0.85) {
                 compressorEnv = Math.min(compressorEnv, rxAdaptiveTarget / absValue);
             }
             compressorEnv = Math.min(1, compressorEnv + 1/(sampleRate * RX_RELEASE_TIME));
@@ -774,8 +757,8 @@
             value = value * playbackGain * compressorEnv * RX_OUTPUT_GAIN;
 
             // Soft limiting
-            if (value > RX_LIMIT) value = RX_LIMIT + (value - RX_LIMIT) * 0.06;
-            if (value < -RX_LIMIT) value = -RX_LIMIT + (value + RX_LIMIT) * 0.06;
+            if (value > RX_LIMIT) value = RX_LIMIT + (value - RX_LIMIT) * 0.12;
+            if (value < -RX_LIMIT) value = -RX_LIMIT + (value + RX_LIMIT) * 0.12;
 
             value = Math.max(-1, Math.min(1, value));
             output[i] = value;
@@ -954,6 +937,7 @@
                 echoCancellation: true,
                 noiseSuppression: true,
                 autoGainControl: false,
+                channelCount: 1,
                 sampleRate: audioCtx.sampleRate
             }
         });
@@ -962,13 +946,19 @@
 
         highpassNode = audioCtx.createBiquadFilter();
         highpassNode.type = "highpass";
-        highpassNode.frequency.value = 350;
-        highpassNode.Q.value = 1.1;
+        highpassNode.frequency.value = 160;
+        highpassNode.Q.value = 0.8;
+
+        midBoostNode = audioCtx.createBiquadFilter();
+        midBoostNode.type = "peaking";
+        midBoostNode.frequency.value = 2400;
+        midBoostNode.Q.value = 0.85;
+        midBoostNode.gain.value = 2.5;
 
         lowpassNode = audioCtx.createBiquadFilter();
         lowpassNode.type = "lowpass";
-        lowpassNode.frequency.value = 3000;
-        lowpassNode.Q.value = 1.1;
+        lowpassNode.frequency.value = 4200;
+        lowpassNode.Q.value = 0.75;
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
         monitorGain = audioCtx.createGain();
@@ -981,7 +971,8 @@
         };
 
         sourceNode.connect(highpassNode);
-        highpassNode.connect(lowpassNode);
+        highpassNode.connect(midBoostNode);
+        midBoostNode.connect(lowpassNode);
         lowpassNode.connect(workletNode);
         workletNode.connect(monitorGain);
         monitorGain.connect(audioCtx.destination);
@@ -1329,7 +1320,6 @@
             txDeesserGain = 1;
             lastMicPeak = 0;
             document.getElementById('pttBtn').classList.add('active');
-            playRadioBeep("start");
         } catch (err) {
             console.error('Unable to start microphone transmit', err);
             stopTX(false);
@@ -1350,7 +1340,6 @@
         updateRadioDisplay();
         socket.emit('tx-status', { transmitting: false });
         playMicClick("up");
-        if (playTone) playRadioBeep("stop");
         document.getElementById('pttBtn').classList.remove('active');
         if (workletNode) {
             workletNode.port.postMessage({ type: 'flush' });
@@ -1540,11 +1529,6 @@
     });
     socket.on('tx-status', (status) => {
         if (status.activeChannel !== activeChannel && status.activeChannel !== monitorChannel) return;
-        if (status.senderId && status.senderId === socket.id) return;
-        
-        if (!status.transmitting) {
-            playNoiseBurst(0, 0.08, 0.015); // The squelch "ker-chunk"
-        }
         if (audioCtx) playRadioBeep(status.transmitting ? "start" : "stop");
     });
     socket.on('callsign-rejected', (info) => {
