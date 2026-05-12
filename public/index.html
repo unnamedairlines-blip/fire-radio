@@ -258,30 +258,30 @@
     const JITTER_MIN = 0.02;
     const JITTER_MAX = 0.25;
     const MAX_INT16 = 0x7FFF;
-    const TX_TARGET_RMS = 0.14;
-    const TX_NOISE_FLOOR = 0.003;
-    const TX_GATE_FLOOR = 0.006;
-    const TX_MIN_GAIN = 0.4;
-    const TX_MAX_GAIN = 12.0;
-    const TX_LIMIT = 0.65;
-    const TX_COMPRESSION_RATIO = 7.5;
+    const TX_TARGET_RMS = 0.12;
+    const TX_NOISE_FLOOR = 0.002;
+    const TX_GATE_FLOOR = 0.004;
+    const TX_MIN_GAIN = 0.45;
+    const TX_MAX_GAIN = 7.0;
+    const TX_LIMIT = 0.78;
+    const TX_COMPRESSION_RATIO = 4.5;
     const TX_ATTACK_TIME = 0.002;
     const TX_RELEASE_TIME = 0.15;
     const TX_DEESS_FREQ = 5500;
     const TX_DEESS_RATIO = 3.0;
-    const RX_TARGET_RMS = 0.16;
-    const RX_NOISE_FLOOR = 0.002;
-    const RX_MIN_GAIN = 0.4;
-    const RX_MAX_GAIN = 14.0;
-    const RX_LIMIT = 0.75;
-    const RX_OUTPUT_GAIN = 1.25;
-    const RX_COMPRESSION_RATIO = 6.0;
+    const RX_TARGET_RMS = 0.13;
+    const RX_NOISE_FLOOR = 0.0015;
+    const RX_MIN_GAIN = 0.5;
+    const RX_MAX_GAIN = 8.0;
+    const RX_LIMIT = 0.82;
+    const RX_OUTPUT_GAIN = 1.0;
+    const RX_COMPRESSION_RATIO = 4.0;
     const RX_ATTACK_TIME = 0.001;
     const RX_RELEASE_TIME = 0.08;
     const RX_DEESS_FREQ = 5000;
     const RX_DEESS_RATIO = 4.0;
     const ADAPTIVE_WINDOW = 15;
-    const ADAPTIVE_RANGE = 0.4;
+    const ADAPTIVE_RANGE = 0.22;
     const PACKET_BUFFER_SIZE = 8;
     const CHANNELS = [
         { id: 'fire-rto', name: 'Fire RTO' },
@@ -515,12 +515,11 @@
 
         try {
             if (type === "start") {
-                playTone(1050, 0.004, 0.07, 0.045, "square");
-                playMDC1200(0.085, 0.032);
+                playTone(910, 0.012, 0.045, 0.018, "sine");
+                playMDC1200(0.066, 0.017);
             } else {
-                playMDC1200(0, 0.03);
-                playTone(520, 0.19, 0.055, 0.034, "square");
-                playTone(185, 0.25, 0.045, 0.03, "sine");
+                playMDC1200(0, 0.015);
+                playTone(185, 0.18, 0.038, 0.026, "sine");
             }
         } catch (err) {
             console.warn('Unable to play radio beep', err);
