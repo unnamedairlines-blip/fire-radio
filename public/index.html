@@ -323,8 +323,8 @@
     const sfxCache = {};
     const sfxUnavailable = {};
     const TRANSMISSION_SFX = {
-        start: ['sfx/motorola-tx-start.mp3', 'sfx/motorola-tx-start.wav', 'sfx/tx-start.mp3', 'sfx/tx-start.wav'],
-        end: ['sfx/motorola-tx-end.mp3', 'sfx/motorola-tx-end.wav', 'sfx/tx-end.mp3', 'sfx/tx-end.wav']
+        start: ['sfx/tx-start.mp3', 'sfx/tx-start.wav', 'sfx/motorola-tx-start.mp3', 'sfx/motorola-tx-start.wav'],
+        end: ['sfx/tx-end.mp3', 'sfx/tx-end.wav', 'sfx/motorola-tx-end.mp3', 'sfx/motorola-tx-end.wav']
     };
 
     const workletCode = `
@@ -455,7 +455,7 @@
         }
 
         const audio = new Audio(source);
-        audio.volume = 0.26;
+        audio.volume = 0.75;
         audio.preload = "auto";
         audio.addEventListener('error', () => {
             sfxUnavailable[source] = true;
@@ -466,7 +466,7 @@
         audio.play().catch(() => {
             sfxUnavailable[source] = true;
             delete sfxCache[type];
-            synthTransmissionSfx(type);
+            playTransmissionSfx(type);
         });
     }
 
