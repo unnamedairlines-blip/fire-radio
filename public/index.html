@@ -763,6 +763,7 @@
 
     function emitToneSamples(samples, channel) {
         let offset = 0;
+        toneSequence = 0;
         const durationMs = Math.ceil((samples.length / audioCtx.sampleRate) * 1000);
         while (offset < samples.length) {
             const length = Math.min(PACKET_SIZE, samples.length - offset);
@@ -1264,6 +1265,7 @@
             isTalking = true;
             updateRadioDisplay();
             resetTxBuffer();
+            txSequence = 0;
             txPacketGain = 1;
             txCompressorGain = 1;
             txDeesserGain = 1;
@@ -1310,13 +1312,19 @@
         const buffer = rxPacketBuffer.get(callsign);
         if (!buffer || buffer.length === 0) return;
 
-        const expectedSeq = rxNextSequence.get(callsign) || 0;
+        let expectedSeq = rxNextSequence.get(callsign);
+        if (expectedSeq === undefined && buffer.length > 0) {
+            expectedSeq = buffer[0].seq;
+            rxNextSequence.set(callsign, expectedSeq);
+        }
+        if (expectedSeq === undefined) return;
         const readyPackets = [];
 
         // Find packets that can be played in order
         while (buffer.length > 0 && buffer[0].seq === expectedSeq) {
             readyPackets.push(buffer.shift());
-            rxNextSequence.set(callsign, expectedSeq + 1);
+            expectedSeq += 1;
+            rxNextSequence.set(callsign, expectedSeq);
         }
 
         // Play ready packets
@@ -1399,7 +1407,12 @@
         rxPackets++;
         const callsign = p.call || 'UNKNOWN';
         const seq = p.seq || 0;
-        const expectedSeq = rxNextSequence.get(callsign) || 0;
+        let expectedSeq = rxNextSequence.get(callsign);
+        if (expectedSeq === undefined) {
+            expectedSeq = seq;
+            rxNextSequence.set(callsign, expectedSeq);
+        }
+        if (seq < expectedSeq) return;
 
         // Add packet to buffer with timestamp
         const packet = { ...p, timestamp: Date.now() };
@@ -1424,9 +1437,6 @@
         // If this is the next expected packet, process the buffer
         if (seq === expectedSeq) {
             processBufferedPackets(callsign);
-        } else if (seq < expectedSeq) {
-            // Duplicate or late packet, ignore
-            return;
         } else {
             // Future packet, check if we need to insert silence for missing packets
             const gap = seq - expectedSeq;
@@ -1435,8 +1445,10 @@
                     insertSilenceForMissingPacket(callsign, PACKET_SIZE / audioCtx.sampleRate);
                     rxNextSequence.set(callsign, expectedSeq + i + 1);
                 }
-                processBufferedPackets(callsign);
+            } else {
+                rxNextSequence.set(callsign, seq);
             }
+            processBufferedPackets(callsign);
         }
     });
 
