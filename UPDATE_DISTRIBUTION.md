@@ -25,8 +25,8 @@ npm.cmd run build
 
 ```text
 latest.yml
-Nexus Radio.exe
-Nexus Radio.exe.blockmap
+Nexus Radio Installer.exe
+Nexus Radio Installer.exe.blockmap
 ```
 
 Users who installed Nexus Radio from the installer will check that folder and install newer versions when available.

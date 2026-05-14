@@ -20,14 +20,14 @@
   },
   "build": {
     "appId": "com.fireradio.app",
-    "artifactName": "${productName}.${ext}",
+    "artifactName": "${productName} Installer.${ext}",
     "files": [
       "**/*",
       "!dist*/**"
     ],
     "win": {
       "target": "nsis",
-      "icon": "public/app-icon-256.png",
+      "icon": "build/app-icon.ico",
       "executableName": "Nexus Radio",
       "signAndEditExecutable": false
     },
@@ -37,7 +37,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Nexus Radio"
+      "shortcutName": "Nexus Radio",
+      "installerIcon": "build/app-icon.ico",
+      "uninstallerIcon": "build/app-icon.ico"
     },
     "publish": {
       "provider": "generic",
