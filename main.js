@@ -1,4 +1,5 @@
-const { app, BrowserWindow, session, globalShortcut, ipcMain } = require('electron');
+const { app, BrowserWindow, session, globalShortcut, ipcMain, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -6,6 +7,41 @@ const path = require('path');
 let mainWindow = null;
 let globalPttProcess = null;
 let registeredKeyCode = null;
+
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+
+function setupAutoUpdater() {
+  if (!app.isPackaged) return;
+
+  autoUpdater.on('update-downloaded', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Nexus Radio Update',
+      message: 'A Nexus Radio update has been downloaded.',
+      detail: 'Restart the app to install it now, or close the app later to install on quit.',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+      cancelId: 1
+    }).then((result) => {
+      if (result.response === 0) {
+        autoUpdater.quitAndInstall();
+      }
+    });
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.warn('Update check failed', err);
+  });
+
+  setTimeout(() => {
+    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      console.warn('Unable to check for updates', err);
+    });
+  }, 5000);
+}
 
 function allowMicrophoneAccess() {
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -36,6 +72,7 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'public/index.html'));
   mainWindow.setMenuBarVisibility(false);
+  setupAutoUpdater();
 }
 
 function stopGlobalPttWatcher() {

@@ -9,6 +9,7 @@
     "build": "electron-builder"
   },
   "dependencies": {
+    "electron-updater": "^6.8.3",
     "express": "^4.18.2",
     "socket.io": "^4.7.2",
     "socket.io-client": "^4.7.2"
@@ -25,10 +26,22 @@
       "!dist*/**"
     ],
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "icon": "public/app-icon-256.png",
       "executableName": "Nexus Radio",
       "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nexus Radio"
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://fire-radio.onrender.com"
     }
   }
 }

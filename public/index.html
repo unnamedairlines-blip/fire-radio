@@ -166,18 +166,17 @@
 <div class="loading-screen" id="loadingScreen" role="status" aria-live="polite" aria-busy="true">
     <div class="loader-radio">
         <div class="brand-row">
-            <div class="brand-mark">MOTOROLA SOLUTIONS</div>
-            <div class="model-mark">ASTRO 25 FIRE</div>
+            <div class="brand-mark">NEXUS RADIO</div>
+            <div class="model-mark"></div>
         </div>
         <div class="loader-lcd">
             <div class="loader-title">
-                <span>RADIO SYSTEM BOOT</span>
+                <span>NEXUS RADIO</span>
                 <span id="loadingElapsed">00S</span>
             </div>
-            <div class="loader-message" id="loadingMessage">WAKING RENDER RELAY...</div>
+            <div class="loader-message" id="loadingMessage">CONNECTING...</div>
             <div class="loader-bar" aria-hidden="true"></div>
         </div>
-        <div class="loader-footer">Console locked until the dispatch relay is online.</div>
     </div>
 </div>
 
@@ -186,8 +185,8 @@
         <div class="card">
             <div class="radio-head">
                 <div class="brand-row">
-                    <div class="brand-mark">MOTOROLA SOLUTIONS</div>
-                    <div class="model-mark">APX CONSOLE</div>
+                    <div class="brand-mark">NEXUS RADIO</div>
+                    <div class="model-mark"></div>
                 </div>
                 <div class="lcd-display">
                     <div class="lcd-line-main">
@@ -197,7 +196,7 @@
                     <div class="lcd-line-sub" id="lcdSubline">RELAY INITIALIZING</div>
                 </div>
             </div>
-            <h3 style="margin-top:0">Subscriber Setup</h3>
+            <h3 style="margin-top:0">Unit</h3>
             <label>Callsign</label>
             <input type="text" id="callsign" value="" placeholder="Enter callsign" required>
             <label>Roblox Username</label>
@@ -211,9 +210,9 @@
             </div>
             <span class="mic-meter-label" id="micMeterLabel">Mic inactive</span>
             <div class="status-row">
-                <div class="status-pill"><span>RELAY</span><strong id="socketStatus">CONNECTING</strong></div>
+                <div class="status-pill"><span>LINK</span><strong id="socketStatus">CONNECTING</strong></div>
                 <div class="status-pill"><span>AUDIO</span><strong id="audioStatus">IDLE</strong></div>
-                <div class="status-pill"><span>SITE</span><strong id="siteStatus">RENDER</strong></div>
+                <div class="status-pill"><span>STATUS</span><strong id="siteStatus">ONLINE</strong></div>
             </div>
             <div class="tone-board">
                 <h3>Tone Board</h3>
@@ -235,10 +234,9 @@
 
     <div class="main">
         <div class="card">
-            <h2 style="margin:0 0 15px 0">Fireground Talkgroups</h2>
+            <h2 style="margin:0 0 15px 0">Channels</h2>
             <div class="channel-grid" id="channelGrid"></div>
             <button class="ptt-btn" id="pttBtn" disabled>OFF AIR</button>
-            <p style="font-size: 11px; color: #8b949e; margin-top: 15px; text-align: center;">ASTRO IMBE AUDIO CHAIN | MDC BURSTS | SQUELCH TAIL | STREAM SYNC</p>
         </div>
     </div>
 </div>
@@ -383,7 +381,7 @@
 
     function requireRelayReady() {
         if (socketConnected) return true;
-        showLoading("WAKING RENDER RELAY...");
+        showLoading("CONNECTING...");
         setAudioStatus("Relay offline");
         refreshConnectionStatus();
         return false;
@@ -455,7 +453,7 @@
         }
 
         const audio = new Audio(source);
-        audio.volume = 0.75;
+        audio.volume = 0.6;
         audio.preload = "auto";
         audio.addEventListener('error', () => {
             sfxUnavailable[source] = true;
@@ -1394,20 +1392,20 @@
         active = false;
         activeChannel = null;
         monitorChannel = null;
-        showLoading("RECONNECTING TO RENDER RELAY...");
+        showLoading("RECONNECTING...");
         refreshConnectionStatus();
         updateUI();
     });
     socket.io.on('reconnect_attempt', () => {
         if (!relayReady) {
-            showLoading("WAKING RENDER RELAY...");
+            showLoading("CONNECTING...");
         } else {
-            showLoading("RECONNECTING TO RENDER RELAY...");
+            showLoading("RECONNECTING...");
         }
         refreshConnectionStatus();
     });
     socket.on('connect_error', () => {
-        showLoading("RENDER RELAY STILL LOADING...");
+        showLoading("CONNECTING...");
         refreshConnectionStatus();
     });
     socket.on('unit-list-update', (units) => {
@@ -1436,7 +1434,7 @@
         });
     }
 
-    showLoading("WAKING RENDER RELAY...");
+    showLoading("CONNECTING...");
 
     navigator.mediaDevices.enumerateDevices().then(devs => {
         const sel = document.getElementById('micInput');
