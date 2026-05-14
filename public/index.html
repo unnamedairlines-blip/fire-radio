@@ -320,6 +320,12 @@
     let relayReady = false;
     let loadingStartedAt = Date.now();
     let loadingTimer = null;
+    const sfxCache = {};
+    const sfxUnavailable = {};
+    const TRANSMISSION_SFX = {
+        start: ['sfx/motorola-tx-start.mp3', 'sfx/motorola-tx-start.wav', 'sfx/tx-start.mp3', 'sfx/tx-start.wav'],
+        end: ['sfx/motorola-tx-end.mp3', 'sfx/motorola-tx-end.wav', 'sfx/tx-end.mp3', 'sfx/tx-end.wav']
+    };
 
     const workletCode = `
         class P extends AudioWorkletProcessor {
@@ -381,6 +387,87 @@
         setAudioStatus("Relay offline");
         refreshConnectionStatus();
         return false;
+    }
+
+    function synthTransmissionSfx(type) {
+        if (!audioCtx) return;
+
+        const now = audioCtx.currentTime;
+        const master = audioCtx.createGain();
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.setValueAtTime(type === "start" ? 1450 : 900, now);
+        filter.Q.value = 3.2;
+        master.gain.setValueAtTime(0.0001, now);
+        master.gain.linearRampToValueAtTime(type === "start" ? 0.035 : 0.028, now + 0.006);
+        master.gain.exponentialRampToValueAtTime(0.0001, now + (type === "start" ? 0.09 : 0.14));
+        filter.connect(master);
+        master.connect(audioCtx.destination);
+
+        const osc = audioCtx.createOscillator();
+        osc.type = type === "start" ? "square" : "sawtooth";
+        if (type === "start") {
+            osc.frequency.setValueAtTime(1180, now);
+            osc.frequency.exponentialRampToValueAtTime(1850, now + 0.045);
+            osc.frequency.exponentialRampToValueAtTime(1320, now + 0.085);
+        } else {
+            osc.frequency.setValueAtTime(740, now);
+            osc.frequency.exponentialRampToValueAtTime(430, now + 0.11);
+        }
+        osc.connect(filter);
+        osc.start(now);
+        osc.stop(now + (type === "start" ? 0.095 : 0.15));
+
+        if (type === "end") {
+            const noiseBuffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.055), audioCtx.sampleRate);
+            const noise = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < noise.length; i++) {
+                const envelope = 1 - (i / noise.length);
+                noise[i] = (Math.random() * 2 - 1) * 0.045 * envelope;
+            }
+            const noiseSource = audioCtx.createBufferSource();
+            const noiseFilter = audioCtx.createBiquadFilter();
+            noiseFilter.type = "bandpass";
+            noiseFilter.frequency.value = 2200;
+            noiseFilter.Q.value = 0.8;
+            noiseSource.buffer = noiseBuffer;
+            noiseSource.connect(noiseFilter);
+            noiseFilter.connect(audioCtx.destination);
+            noiseSource.start(now + 0.035);
+        }
+    }
+
+    function playTransmissionSfx(type) {
+        if (!audioCtx) return;
+        const sources = TRANSMISSION_SFX[type] || [];
+        const cached = sfxCache[type];
+
+        if (cached) {
+            cached.currentTime = 0;
+            cached.play().catch(() => synthTransmissionSfx(type));
+            return;
+        }
+
+        const source = sources.find(path => !sfxUnavailable[path]);
+        if (!source) {
+            synthTransmissionSfx(type);
+            return;
+        }
+
+        const audio = new Audio(source);
+        audio.volume = 0.26;
+        audio.preload = "auto";
+        audio.addEventListener('error', () => {
+            sfxUnavailable[source] = true;
+            if (sfxCache[type] === audio) delete sfxCache[type];
+            playTransmissionSfx(type);
+        }, { once: true });
+        sfxCache[type] = audio;
+        audio.play().catch(() => {
+            sfxUnavailable[source] = true;
+            delete sfxCache[type];
+            synthTransmissionSfx(type);
+        });
     }
 
     function setAudioStatus(text) {
@@ -1150,6 +1237,7 @@
             }
 
             isTalking = true;
+            playTransmissionSfx("start");
             updateRadioDisplay();
             resetTxBuffer();
             txSequence = 0;
@@ -1175,6 +1263,7 @@
         if (txOffset > 0 && audioCtx) emitAudioPacket(txBuffer, txOffset);
         resetTxBuffer();
         isTalking = false;
+        playTransmissionSfx("end");
         updateRadioDisplay();
         socket.emit('tx-status', { transmitting: false });
         document.getElementById('pttBtn').classList.remove('active');
@@ -1326,6 +1415,9 @@
     });
     socket.on('tx-status', (status) => {
         if (status.activeChannel !== activeChannel && status.activeChannel !== monitorChannel) return;
+        if (status.senderId && status.senderId !== socket.id && audioCtx) {
+            playTransmissionSfx(status.transmitting ? "start" : "end");
+        }
         updateRadioDisplay();
     });
     socket.on('callsign-rejected', (info) => {
