@@ -253,7 +253,7 @@
         reconnectionDelayMax: 4000,
         timeout: 20000
     });
-    const PACKET_SIZE = 1024;
+    const PACKET_SIZE = 2048;
     const JITTER_TARGET = 0.08;
     const JITTER_MIN = 0.02;
     const JITTER_MAX = 0.25;
@@ -327,7 +327,7 @@
                 const input = ins[0][0];
                 if (!input) return true;
 
-                this.port.postMessage(new Float32Array(input));
+                this.port.postMessage(input.slice());
                 return true;
             }
         }
@@ -381,112 +381,6 @@
         setAudioStatus("Relay offline");
         refreshConnectionStatus();
         return false;
-    }
-
-    function playTone(freq, start, dur, volume = 0.035, type = "square") {
-        if (!audioCtx) return;
-        const osc = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        const t = audioCtx.currentTime + start;
-
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, t);
-        g.gain.setValueAtTime(0.001, t);
-        g.gain.linearRampToValueAtTime(volume, t + 0.004);
-        g.gain.setValueAtTime(volume, t + Math.max(0.004, dur - 0.012));
-        g.gain.linearRampToValueAtTime(0.001, t + dur);
-        osc.connect(g); g.connect(audioCtx.destination);
-        osc.start(t); osc.stop(t + dur + 0.02);
-    }
-
-    function playMDC1200(start, volume = 0.02) {
-        if (!audioCtx) return;
-        const t = audioCtx.currentTime + start;
-        const bitTime = 0.0075;
-        const pattern = [1,0,1,1,0,0,1,0,1,0,0,1,1,1,0,1,0,0,1,1,0,1,0,1];
-        const dur = pattern.length * bitTime;
-        const mdcOsc = audioCtx.createOscillator();
-        const mdcFilter = audioCtx.createBiquadFilter();
-        const mdcG = audioCtx.createGain();
-
-        mdcOsc.type = "sine";
-        pattern.forEach((bit, i) => {
-            mdcOsc.frequency.setValueAtTime(bit ? 1800 : 1200, t + i * bitTime);
-        });
-        mdcFilter.type = "bandpass";
-        mdcFilter.frequency.value = 1500;
-        mdcFilter.Q.value = 3.8;
-        mdcG.gain.setValueAtTime(0, t);
-        mdcG.gain.linearRampToValueAtTime(volume, t + 0.006);
-        mdcG.gain.setValueAtTime(volume, t + dur - 0.01);
-        mdcG.gain.linearRampToValueAtTime(0.001, t + dur);
-        mdcOsc.connect(mdcFilter);
-        mdcFilter.connect(mdcG);
-        mdcG.connect(audioCtx.destination);
-        mdcOsc.start(t);
-        mdcOsc.stop(t + dur + 0.02);
-    }
-
-    function playMicClick(type = "down") {
-        if (!audioCtx) return;
-        const dur = type === "down" ? 0.015 : 0.02;
-        const freq = type === "down" ? 800 : 600;
-        const g = audioCtx.createGain();
-        const osc = audioCtx.createOscillator();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        g.gain.setValueAtTime(0.04, audioCtx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
-        osc.connect(g); g.connect(audioCtx.destination);
-        osc.start(); osc.stop(audioCtx.currentTime + dur);
-
-        if (type === "down") {
-            // Low-frequency physical mic "thump"
-            const thump = audioCtx.createOscillator();
-            const tg = audioCtx.createGain();
-            thump.frequency.setValueAtTime(60, audioCtx.currentTime);
-            tg.gain.setValueAtTime(0.12, audioCtx.currentTime);
-            tg.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
-            thump.connect(tg); tg.connect(audioCtx.destination);
-            thump.start(); thump.stop(audioCtx.currentTime + 0.04);
-        }
-    }
-
-    function playMotorolaControlBurst(start, pattern) {
-        pattern.forEach(([fromFreq, toFreq, offset, dur, volume]) => {
-            const osc = audioCtx.createOscillator();
-            const g = audioCtx.createGain();
-            const t = audioCtx.currentTime + start + offset;
-
-            osc.type = "square";
-            osc.frequency.setValueAtTime(fromFreq, t);
-            osc.frequency.exponentialRampToValueAtTime(toFreq, t + dur);
-            g.gain.setValueAtTime(0.001, t);
-            g.gain.linearRampToValueAtTime(volume, t + 0.004);
-            g.gain.setValueAtTime(volume, t + Math.max(0.006, dur - 0.01));
-            g.gain.linearRampToValueAtTime(0.001, t + dur);
-            osc.connect(g);
-            g.connect(audioCtx.destination);
-            osc.start(t);
-            osc.stop(t + dur + 0.02);
-        });
-    }
-
-    function playRadioBeep(type) {
-        if (!audioCtx) return;
-
-        try {
-            if (type === "start") {
-                playTone(1050, 0.004, 0.07, 0.045, "square");
-                playMDC1200(0.085, 0.032);
-            } else {
-                playMDC1200(0, 0.03);
-                playTone(520, 0.19, 0.055, 0.034, "square");
-                playTone(185, 0.25, 0.045, 0.03, "sine");
-            }
-        } catch (err) {
-            console.warn('Unable to play radio beep', err);
-        }
     }
 
     function setAudioStatus(text) {
@@ -614,10 +508,9 @@
     }
 
     function emitAudioPacket(samples, length = samples.length) {
-        const normalizedSamples = normalizeTransmitAudio(samples, length);
         const int16 = new Int16Array(length);
         for (let i = 0; i < length; i++) {
-            int16[i] = normalizedSamples[i] * MAX_INT16;
+            int16[i] = Math.max(-1, Math.min(1, samples[i])) * MAX_INT16;
         }
 
         socket.emit('audio-packet', {
@@ -893,28 +786,22 @@
         if (micStream && workletNode) return;
         setAudioStatus("Opening mic...");
 
+        await audioCtx.resume();
         const selectedDevice = document.getElementById('micInput').value;
         micStream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 deviceId: selectedDevice ? { exact: selectedDevice } : undefined,
                 echoCancellation: true,
                 noiseSuppression: true,
-                autoGainControl: false,
-                sampleRate: audioCtx.sampleRate
+                autoGainControl: true
             }
         });
 
         sourceNode = audioCtx.createMediaStreamSource(micStream);
 
-        highpassNode = audioCtx.createBiquadFilter();
-        highpassNode.type = "highpass";
-        highpassNode.frequency.value = 350;
-        highpassNode.Q.value = 1.1;
-
         lowpassNode = audioCtx.createBiquadFilter();
         lowpassNode.type = "lowpass";
-        lowpassNode.frequency.value = 3000;
-        lowpassNode.Q.value = 1.1;
+        lowpassNode.frequency.value = 6000;
 
         workletNode = new AudioWorkletNode(audioCtx, 'radio-processor');
         monitorGain = audioCtx.createGain();
@@ -925,8 +812,7 @@
             if (isTalking && active) queueMicSamples(e.data);
         };
 
-        sourceNode.connect(highpassNode);
-        highpassNode.connect(lowpassNode);
+        sourceNode.connect(lowpassNode);
         lowpassNode.connect(workletNode);
         workletNode.connect(monitorGain);
         monitorGain.connect(audioCtx.destination);
@@ -1039,12 +925,12 @@
             rxCompressorGain = 1;
             rxDeesserGain = 1;
 
-            if (active) {
-                await startMicPipeline();
-            } else {
+            if (!active) {
                 stopTX(false);
                 stopMicPipeline();
                 setAudioStatus(`Idle | TX ${txPackets} | RX ${rxPackets}`);
+            } else {
+                setAudioStatus(`Ready | TX ${txPackets} | RX ${rxPackets}`);
             }
 
             updateUI();
@@ -1243,11 +1129,11 @@
 
         try {
             await ensureAudioContext();
-            playMicClick("down");
             await startMicPipeline();
             const txGrant = await requestTxStart();
             if (!txGrant.ok) {
                 txHeld = false;
+                stopMicPipeline();
                 const busyText = txGrant.reason === 'channel-busy'
                     ? `Channel busy: ${txGrant.callsign || 'UNKNOWN'}`
                     : txGrant.reason === 'relay-offline'
@@ -1259,6 +1145,7 @@
 
             if (!txHeld) {
                 socket.emit('tx-status', { transmitting: false });
+                stopMicPipeline();
                 return;
             }
 
@@ -1290,11 +1177,8 @@
         isTalking = false;
         updateRadioDisplay();
         socket.emit('tx-status', { transmitting: false });
-        playMicClick("up");
         document.getElementById('pttBtn').classList.remove('active');
-        if (workletNode) {
-            workletNode.port.postMessage({ type: 'flush' });
-        }
+        stopMicPipeline();
         setAudioStatus(`Idle | TX ${txPackets} | RX ${rxPackets}`);
     }
 
@@ -1348,7 +1232,6 @@
         let f32 = new Float32Array(int16.length);
         for(let i = 0; i < int16.length; i++) f32[i] = int16[i] / MAX_INT16;
         f32 = resampleLinear(f32, packet.sampleRate, audioCtx.sampleRate);
-        f32 = normalizePlaybackAudio(f32, packet.call || 'UNKNOWN');
 
         const buf = audioCtx.createBuffer(1, f32.length, audioCtx.sampleRate);
         buf.getChannelData(0).set(f32);
@@ -1359,9 +1242,8 @@
 
         const now = audioCtx.currentTime;
 
-        // Improved jitter buffer management
-        if (nextStartTime < now + JITTER_MIN || nextStartTime > now + JITTER_MAX) {
-            nextStartTime = now + JITTER_TARGET;
+        if (nextStartTime < now + 0.05 || nextStartTime > now + 0.75) {
+            nextStartTime = now + 0.25;
         }
 
         src.start(nextStartTime);
@@ -1405,51 +1287,7 @@
         }, 500);
 
         rxPackets++;
-        const callsign = p.call || 'UNKNOWN';
-        const seq = p.seq || 0;
-        let expectedSeq = rxNextSequence.get(callsign);
-        if (expectedSeq === undefined) {
-            expectedSeq = seq;
-            rxNextSequence.set(callsign, expectedSeq);
-        }
-        if (seq < expectedSeq) return;
-
-        // Add packet to buffer with timestamp
-        const packet = { ...p, timestamp: Date.now() };
-        if (!rxPacketBuffer.has(callsign)) {
-            rxPacketBuffer.set(callsign, []);
-        }
-        const buffer = rxPacketBuffer.get(callsign);
-
-        // Insert in sequence order
-        let insertIndex = buffer.findIndex(existing => existing.seq > seq);
-        if (insertIndex === -1) {
-            buffer.push(packet);
-        } else {
-            buffer.splice(insertIndex, 0, packet);
-        }
-
-        // Limit buffer size
-        if (buffer.length > PACKET_BUFFER_SIZE) {
-            buffer.shift(); // Drop oldest packet
-        }
-
-        // If this is the next expected packet, process the buffer
-        if (seq === expectedSeq) {
-            processBufferedPackets(callsign);
-        } else {
-            // Future packet, check if we need to insert silence for missing packets
-            const gap = seq - expectedSeq;
-            if (gap <= 3) { // Only fill small gaps
-                for (let i = 0; i < gap; i++) {
-                    insertSilenceForMissingPacket(callsign, PACKET_SIZE / audioCtx.sampleRate);
-                    rxNextSequence.set(callsign, expectedSeq + i + 1);
-                }
-            } else {
-                rxNextSequence.set(callsign, seq);
-            }
-            processBufferedPackets(callsign);
-        }
+        playAudioPacket(p);
     });
 
     socket.on('connect', () => {
@@ -1488,7 +1326,7 @@
     });
     socket.on('tx-status', (status) => {
         if (status.activeChannel !== activeChannel && status.activeChannel !== monitorChannel) return;
-        if (audioCtx) playRadioBeep(status.transmitting ? "start" : "stop");
+        updateRadioDisplay();
     });
     socket.on('callsign-rejected', (info) => {
         if (info && info.callsign) {
